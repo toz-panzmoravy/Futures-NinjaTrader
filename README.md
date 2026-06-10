@@ -8,7 +8,9 @@ NinjaTrader 8 automatické obchodní systémy (AOS) pro futures prop-trading.
 
 | Složka | Instrument | Strategie | Verze |
 |--------|------------|-----------|-------|
-| [`2/`](2/NinjaTrader/) | MES | VWAP Pullback Prop | v1.0.5 |
+| [`2/`](2/NinjaTrader/) | MES | VWAP Pullback Prop (1min) | v1.0.4 |
+| [`2/`](2/NinjaTrader/) | MES | VWAP Pullback Prop (tick) | v1.0.5 |
+| [`2/`](2/NinjaTrader/) | MES | VWAP Pullback Prop (prop/tick) | v1.0.6 |
 | [`MNQ/`](MNQ/) | MNQ | ORB Prop | v1.0.0 |
 | [`ZN/`](ZN/) | ZN | Mean Reversion Prop | v1.0.0 |
 | [`1/`](1/) | MES | VWAP Pullback (legacy) | v1.0.0 |

@@ -17,7 +17,9 @@ Každá nová verze strategie v **jakékoliv složce** se verzuje samostatně, o
 | Složka | Instrument | Strategie | Aktuální soubor | Poslední verze |
 |--------|------------|-----------|-----------------|----------------|
 | `1/` | MES | VWAP Pullback (legacy) | `1/Strategies/AOS_VWAPPullbackStrategy.cs` | `v1.0.0` |
-| `2/` | MES | VWAP Pullback Prop | `2/NinjaTrader/Strategies/VwapPullbackProp_v105.cs` | `v1.0.5` |
+| `2/` | MES | VWAP Pullback Prop (1min) | `2/NinjaTrader/Strategies/VwapPullbackProp_v104.cs` | `v1.0.4` |
+| `2/` | MES | VWAP Pullback Prop (tick) | `2/NinjaTrader/Strategies/VwapPullbackProp_v105.cs` | `v1.0.5` |
+| `2/` | MES | VWAP Pullback Prop (prop/tick) | `2/NinjaTrader/Strategies/VwapPullbackProp_v106.cs` | `v1.0.6` |
 | `MNQ/` | MNQ | ORB Prop | `MNQ/NinjaTrader/Strategies/MNQ_OrbPropStrategy.cs` | `v1.0.0` |
 | `ZN/` | ZN | Mean Reversion Prop | `ZN/NinjaTrader/Strategies/ZN_MeanReversionPropStrategy.cs` | `v1.0.0` |
 

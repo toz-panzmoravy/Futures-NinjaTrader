@@ -15,11 +15,10 @@ using NinjaTrader.NinjaScript.Strategies;
 namespace NinjaTrader.NinjaScript.Strategies
 {
 	/// <summary>
-	/// VWAP Pullback Prop AOS v1.05 – TICK CHART preset (80 / 120 / 150 tick).
-	/// Stejná logika a barové parametry jako v1.04 – ověřeno na tick grafech.
-	/// Na 1min grafu používej v1.04.
+	/// VWAP Pullback Prop AOS v1.06 – PROP/TICK optimalizace z backtestu 125 tick.
+	/// Konec vstupů 20:30, blok hodin 17+19, stop po 3 ztrátách za den.
 	/// </summary>
-	public class VwapPullbackProp_v105 : Strategy
+	public class VwapPullbackProp_v106 : Strategy
 	{
 		#region Enums
 		private enum SetupState { Idle, ArmedLong, ArmedShort }
@@ -46,9 +45,12 @@ namespace NinjaTrader.NinjaScript.Strategies
 		private string lastParsedNewsTimes;
 
 		private int dailyTradeCount;
+		private int dailyConsecutiveLosses;
 		private int cooldownUntilBar;
 		private double sessionRealizedStartPnL;
 		private bool tickChartWarningShown;
+		private List<int> blockedEntryHours;
+		private string lastParsedBlockedHours;
 		#endregion
 
 		#region OnStateChange
@@ -56,8 +58,8 @@ namespace NinjaTrader.NinjaScript.Strategies
 		{
 			if (State == State.SetDefaults)
 			{
-				Description = "VWAP Pullback Prop v1.05 – TICK chart (80/120/150 tick). Stejné bary jako v1.04.";
-				Name = "VwapPullbackProp_v105";
+				Description = "VWAP Pullback Prop v1.06 – prop/tick optimalizace (end 20:30, skip 17+19h, 3 loss stop).";
+				Name = "VwapPullbackProp_v106";
 				Calculate = Calculate.OnBarClose;
 				EntriesPerDirection = 1;
 				EntryHandling = EntryHandling.AllEntries;
@@ -98,11 +100,13 @@ namespace NinjaTrader.NinjaScript.Strategies
 
 				DailyLossLimit = 500;
 				MaxTradesPerDay = 8;
+				MaxConsecutiveLossesPerDay = 3;
 				CooldownBarsAfterLoss = 2;
 				SkipFirstMinutes = 10;
+				BlockedEntryHours = "17,19";
 
 				EntryStartTime = DateTime.Parse("15:30", CultureInfo.InvariantCulture);
-				EntryEndTime = DateTime.Parse("21:45", CultureInfo.InvariantCulture);
+				EntryEndTime = DateTime.Parse("20:30", CultureInfo.InvariantCulture);
 				FlatTime = DateTime.Parse("21:55", CultureInfo.InvariantCulture);
 
 				NewsTimes = string.Empty;
@@ -122,6 +126,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 				ema = EMA(Close, EmaPeriod);
 				ResetSessionState(true);
 				ParseNewsTimes();
+				ParseBlockedEntryHours();
 			}
 		}
 		#endregion
@@ -215,6 +220,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 			dailyLossLimitHit = false;
 			flatBeforeCloseDone = false;
 			dailyTradeCount = 0;
+			dailyConsecutiveLosses = 0;
 			cooldownUntilBar = 0;
 			sessionRealizedStartPnL = SystemPerformance.AllTrades.TradesPerformance.Currency.CumProfit;
 			ResetSetupState();
@@ -233,6 +239,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 			cumulativeVolume = 0;
 			sessionVwap = 0;
 			dailyTradeCount = 0;
+			dailyConsecutiveLosses = 0;
 			cooldownUntilBar = 0;
 
 			if (fullReset)
@@ -272,11 +279,38 @@ namespace NinjaTrader.NinjaScript.Strategies
 				return false;
 			if (CooldownBarsAfterLoss > 0 && CurrentBar < cooldownUntilBar)
 				return false;
+			if (MaxConsecutiveLossesPerDay > 0 && dailyConsecutiveLosses >= MaxConsecutiveLossesPerDay)
+				return false;
 			if (!IsWithinEntryWindow())
+				return false;
+			if (IsBlockedEntryHour())
 				return false;
 			if (IsInNewsBlockWindow())
 				return false;
 			return true;
+		}
+
+		private void ParseBlockedEntryHours()
+		{
+			if (BlockedEntryHours == lastParsedBlockedHours)
+				return;
+			lastParsedBlockedHours = BlockedEntryHours;
+			blockedEntryHours = new List<int>();
+			if (string.IsNullOrWhiteSpace(BlockedEntryHours))
+				return;
+			foreach (string part in BlockedEntryHours.Split(new[] { ',', ';', '|' }, StringSplitOptions.RemoveEmptyEntries))
+			{
+				if (int.TryParse(part.Trim(), out int hour) && hour >= 0 && hour <= 23)
+					blockedEntryHours.Add(hour);
+			}
+		}
+
+		private bool IsBlockedEntryHour()
+		{
+			ParseBlockedEntryHours();
+			if (blockedEntryHours == null || blockedEntryHours.Count == 0)
+				return false;
+			return blockedEntryHours.Contains(Time[0].Hour);
 		}
 
 		private bool IsWithinEntryWindow()
@@ -512,18 +546,24 @@ namespace NinjaTrader.NinjaScript.Strategies
 				return;
 			}
 
-			if (CooldownBarsAfterLoss <= 0)
-				return;
-
 			bool isExit = execution.Order.Name == "Stop loss" || execution.Order.Name == "Profit target"
 				|| execution.Order.Name == "FlatBeforeClose" || execution.Order.Name == "NewsClose";
-			if (!isExit)
+			if (!isExit || marketPosition != MarketPosition.Flat)
 				return;
 
-			if (execution.Order.OrderAction == OrderAction.Sell && marketPosition == MarketPosition.Flat && price < entryPrice)
-				cooldownUntilBar = CurrentBar + CooldownBarsAfterLoss;
-			else if (execution.Order.OrderAction == OrderAction.BuyToCover && marketPosition == MarketPosition.Flat && price > entryPrice)
-				cooldownUntilBar = CurrentBar + CooldownBarsAfterLoss;
+			bool isLoss = (execution.Order.OrderAction == OrderAction.Sell && price < entryPrice)
+				|| (execution.Order.OrderAction == OrderAction.BuyToCover && price > entryPrice);
+
+			if (isLoss)
+			{
+				dailyConsecutiveLosses++;
+				if (CooldownBarsAfterLoss > 0)
+					cooldownUntilBar = CurrentBar + CooldownBarsAfterLoss;
+			}
+			else
+			{
+				dailyConsecutiveLosses = 0;
+			}
 		}
 
 		private void ManageOpenPosition()
@@ -674,13 +714,21 @@ namespace NinjaTrader.NinjaScript.Strategies
 		[Display(Name = "Max Trades Per Day", Description = "0 = bez limitu.", Order = 2, GroupName = "4. Risk")]
 		public int MaxTradesPerDay { get; set; }
 
+		[NinjaScriptProperty][Range(0, 10)]
+		[Display(Name = "Max Consecutive Losses/Day", Description = "0 = vypnuto. Po N ztrátách stop vstupů do konce dne.", Order = 3, GroupName = "4. Risk")]
+		public int MaxConsecutiveLossesPerDay { get; set; }
+
 		[NinjaScriptProperty][Range(0, 100)]
-		[Display(Name = "Cooldown Bars After Loss", Order = 3, GroupName = "4. Risk")]
+		[Display(Name = "Cooldown Bars After Loss", Order = 4, GroupName = "4. Risk")]
 		public int CooldownBarsAfterLoss { get; set; }
 
 		[NinjaScriptProperty][Range(0, 120)]
-		[Display(Name = "Skip First Minutes", Order = 4, GroupName = "4. Risk")]
+		[Display(Name = "Skip First Minutes", Order = 5, GroupName = "4. Risk")]
 		public int SkipFirstMinutes { get; set; }
+
+		[NinjaScriptProperty]
+		[Display(Name = "Blocked Entry Hours", Description = "Hodiny bez vstupů, např. 17,19 (čas grafu).", Order = 6, GroupName = "4. Risk")]
+		public string BlockedEntryHours { get; set; }
 
 		[NinjaScriptProperty][PropertyEditor("NinjaTrader.Gui.Tools.TimeEditorKey")]
 		[Display(Name = "Entry Start Time", Order = 1, GroupName = "5. Čas")]

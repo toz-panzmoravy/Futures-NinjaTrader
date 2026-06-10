@@ -10,9 +10,11 @@ Automatický obchodní systém pro **MES (Micro E-mini S&P 500)** založený na 
 | **v1.01** | `VwapPullbackProp_v101.cs` | Přísnější filtry signálů, trailing vypnutý defaultně |
 | **v1.02** | `VwapPullbackProp_v102.cs` | Win rate preset – příliš málo obchodů, nepoužívat |
 | **v1.03** | `VwapPullbackProp_v103.cs` | HIGH FREQUENCY – moc uvolněné, shorty ničí P&L |
-| **v1.04** | `VwapPullbackProp_v104.cs` | **MES BALANCED – doporučená verze** |
+| **v1.04** | `VwapPullbackProp_v104.cs` | **MES BALANCED – doporučená pro 1min** |
+| **v1.05** | `VwapPullbackProp_v105.cs` | TICK CHART – stejné parametry jako v1.04 |
+| **v1.06** | `VwapPullbackProp_v106.cs` | **PROP/TICK – doporučeno po analýze backtestu** |
 
-> **Používej v1.04** na MES, 1 kontrakt. v1.03 ukázala: frekvence OK, ale SHORT -1347 $ = katastrofa.
+> **1min:** v1.04. **Tick (80–150):** v1.06. **v1.06** = konec vstupů 20:30, blok hodin 17+19, stop po 3 ztrátách/den.
 
 ## Instalace
 
@@ -123,14 +125,30 @@ Backtest v1.03: **355 obchodů** (frekvence OK), ale **-1 417 $** – shorty **-
 
 **v1.04 default:** LONG-only, SL 40 / PT 75, potvrzení na **další** svíčce, EMA slope, close beyond prior bar, skip 10 min po open.
 
+## v1.06 – PROP optimalizace (z analýzy 261 obchodů, 125 tick)
+
+Backtest v1.04 odhalil kde strategie ztrácí:
+
+| Problém | Data | Oprava v v1.06 |
+|---|---|---|
+| Večerní obchody 19–21h | -491 $ | `Entry End` **20:30** |
+| Hodina 17:xx | -464 $ | `Blocked Entry Hours` **17,19** |
+| Hodina 19:xx | -295 $ | (viz výše) |
+| Série 4–5 SL za den | max -206 $/den | `Max Consecutive Losses/Day` **3** |
+| FlatBeforeClose | **+466 $** | Beze změny (neškodí) |
+
+Simulovaný výsledek (s provizí 0,62 $/RT): **~1 548 $** vs **411 $** baseline, max DD **-691 $** vs **-1 159 $**.
+
+**Doporučení:** MES tick graf (80–150), strategie **VwapPullbackProp_v106**, časy v čase grafu (SEČ).
+
 ## Doporučené nastavení grafu
 
-| Parametr | Hodnota |
-|---|---|
-| Instrument | MES (Micro E-mini S&P 500) |
-| Interval | 1 Minute |
-| Session template | CME US Index Futures RTH (nebo ETH dle potřeby) |
-| Calculate | On bar close (default strategie) |
+| Parametr | v1.04 | v1.05 |
+|---|---|---|
+| Instrument | MES | MES |
+| Interval | 1 Minute | **80 / 120 / 150 Tick** |
+| Session template | CME US Index Futures RTH | stejné |
+| Calculate | On bar close | On bar close |
 
 > **Tip:** Nejdřív testuj v **Sim** nebo **Market Replay**, než pustíš strategii na live/prop účet.
 
