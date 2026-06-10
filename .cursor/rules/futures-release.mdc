@@ -1,0 +1,13 @@
+---
+description: Release workflow pro Futures-NinjaTrader – commit, tag, push
+alwaysApply: true
+---
+
+Před jakýmkoliv git commitem, tagem nebo pushem strategie v tomto repozitáři:
+
+1. Přečti a dodržuj `RELEASE.md` v kořeni repozitáře.
+2. Cílový remote: `https://github.com/toz-panzmoravy/Futures-NinjaTrader.git`
+3. Každá nová verze strategie dostane annotated tag ve formátu `{instrument}/{strategy-slug}/v{X.Y.Z}`.
+4. Aktualizuj tabulku verzí v `RELEASE.md` §2.
+5. Nepřidávej `Exports/`, `*.csv` ani citlivé soubory (viz `.gitignore`).
+6. Commit messages: `feat(scope): popis` dle `RELEASE.md` §5.
