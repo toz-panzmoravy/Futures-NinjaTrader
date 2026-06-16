@@ -17,6 +17,7 @@ Každá nová verze strategie v **jakékoliv složce** se verzuje samostatně, o
 | Složka | Instrument | Strategie | Aktuální soubor | Poslední verze |
 |--------|------------|-----------|-----------------|----------------|
 | `MES/` | MES | Microtrend Prop (TICK 200) | `MES/NinjaTrader/Strategies/MesMicrotrendProp_v104.cs` | `v1.0.4` |
+| `MNQ/` | MNQ | Microtrend Prop (PullbackBreak L+S) | `MNQ/NinjaTrader/Strategies/MnqMicrotrendProp_v105.cs` | `v1.0.5` |
 
 > **Po každém release aktualizuj sloupec „Poslední verze" v této tabulce.**
 
@@ -58,6 +59,7 @@ Při vytvoření nové verze ve složce `MES/`:
 | Instrument | strategy-slug | Příklad tagu |
 |------------|---------------|--------------|
 | `mes` | `microtrend-prop` | `mes/microtrend-prop/v1.0.4` |
+| `mnq` | `microtrend-prop` | `mnq/microtrend-prop/v1.0.4` |
 
 - Tagy jsou **annotated** (s popisem), ne lightweight.
 - Jeden tag = jedna verze jedné strategie.
@@ -93,6 +95,7 @@ Při vytvoření nové verze ve složce `MES/`:
 | scope | Hodnota |
 |-------|---------|
 | `mes` | složka `MES/` |
+| `mnq` | složka `MNQ/` |
 | `repo` | kořenové soubory (RELEASE.md, README, .gitignore) |
 
 **Příklady:**
