@@ -16,14 +16,7 @@ Každá nová verze strategie v **jakékoliv složce** se verzuje samostatně, o
 
 | Složka | Instrument | Strategie | Aktuální soubor | Poslední verze |
 |--------|------------|-----------|-----------------|----------------|
-| `1/` | MES | VWAP Pullback (legacy) | `1/Strategies/AOS_VWAPPullbackStrategy.cs` | `v1.0.0` |
-| `2/` | MES | VWAP Pullback Prop (1min) | `2/NinjaTrader/Strategies/VwapPullbackProp_v104.cs` | `v1.0.4` |
-| `2/` | MES | VWAP Pullback Prop (tick) | `2/NinjaTrader/Strategies/VwapPullbackProp_v105.cs` | `v1.0.5` |
-| `2/` | MES | VWAP Pullback Prop (prop/tick) | `2/NinjaTrader/Strategies/VwapPullbackProp_v106.cs` | `v1.0.6` |
-| `2/` | MES | VWAP Pullback Prop (wide/tick) | `2/NinjaTrader/Strategies/VwapPullbackProp_v107.cs` | `v1.0.7` |
-| `2/` | MES | VWAP Pullback Prop (prod TICK 125) | `2/NinjaTrader/Strategies/VwapPullbackProp_v205.cs` | `v2.0.5` |
-| `MNQ/` | MNQ | ORB Prop | `MNQ/NinjaTrader/Strategies/MNQ_OrbPropStrategy.cs` | `v1.0.0` |
-| `ZN/` | ZN | Mean Reversion Prop | `ZN/NinjaTrader/Strategies/ZN_MeanReversionPropStrategy.cs` | `v1.0.0` |
+| `MES/` | MES | Microtrend Prop (TICK 200) | `MES/NinjaTrader/Strategies/MesMicrotrendProp_v104.cs` | `v1.0.4` |
 
 > **Po každém release aktualizuj sloupec „Poslední verze" v této tabulce.**
 
@@ -44,16 +37,13 @@ Formát: `MAJOR.MINOR.PATCH` (např. `1.0.5`)
 | Nová funkce, nový filtr, změna defaultů | MINOR | `1.4.0` → `1.5.0` |
 | Bugfix, kosmetika, komentáře | PATCH | `1.4.0` → `1.4.1` |
 
-**Mapování na název souboru (složka `2/` a podobné):**
-- `v1.05` v názvu souboru = semver `v1.0.5`
-- `v104` = `v1.0.4`
+**Mapování na název souboru (složka `MES/`):**
+- `v104` v názvu souboru = semver `v1.0.4`
 
-Při vytvoření nové verze ve složce `2/`:
-1. Zkopíruj předchozí soubor → `VwapPullbackProp_v106.cs` (pokud MINOR/PATCH)
+Při vytvoření nové verze ve složce `MES/`:
+1. Zkopíruj předchozí soubor → `MesMicrotrendProp_v105.cs` (pokud MINOR/PATCH)
 2. Aktualizuj `Name`, `Description` a XML komentář verze uvnitř třídy
-3. Aktualizuj tabulku verzí v `2/NinjaTrader/README.md`
-
-U strategií bez verze v názvu souboru (MNQ, ZN): verze se eviduje **pouze v git tagu** a v této tabulce.
+3. Aktualizuj tabulku verzí v `MES/README.md` a v §2 tohoto souboru
 
 ---
 
@@ -67,10 +57,7 @@ U strategií bez verze v názvu souboru (MNQ, ZN): verze se eviduje **pouze v gi
 
 | Instrument | strategy-slug | Příklad tagu |
 |------------|---------------|--------------|
-| `mes` | `vwap-pullback-prop` | `mes/vwap-pullback-prop/v1.0.5` |
-| `mes` | `vwap-pullback` | `mes/vwap-pullback/v1.0.0` |
-| `mnq` | `orb-prop` | `mnq/orb-prop/v1.0.0` |
-| `zn` | `mean-reversion-prop` | `zn/mean-reversion-prop/v1.0.0` |
+| `mes` | `microtrend-prop` | `mes/microtrend-prop/v1.0.4` |
 
 - Tagy jsou **annotated** (s popisem), ne lightweight.
 - Jeden tag = jedna verze jedné strategie.
@@ -105,9 +92,7 @@ U strategií bez verze v názvu souboru (MNQ, ZN): verze se eviduje **pouze v gi
 
 | scope | Hodnota |
 |-------|---------|
-| `mes` | složky `1/`, `2/` |
-| `mnq` | složka `MNQ/` |
-| `zn` | složka `ZN/` |
+| `mes` | složka `MES/` |
 | `repo` | kořenové soubory (RELEASE.md, README, .gitignore) |
 
 **Příklady:**
