@@ -17,12 +17,22 @@ namespace NinjaTrader.NinjaScript.Indicators
 {
 	public class MES500TSqueezeMomentum : Indicator
 	{
+		private enum TradeState
+		{
+			Flat,
+			Long,
+			Short
+		}
+
 		private EMA bbEmaInd;
 		private StdDev bbStdDevInd;
 		private EMA kcEmaInd;
 		private ATR kcAtrInd;
 		private MACD macdInd;
 		private SimpleFont signalFont;
+		private TradeState tradeState;
+		private int nextTradeId;
+		private int openTradeId;
 
 		protected override void OnStateChange()
 		{
@@ -51,15 +61,19 @@ namespace NinjaTrader.NinjaScript.Indicators
 				EnableAlerts = true;
 				ShowSignals = true;
 				ShowSignalLabels = true;
+				ShowCloseSignals = true;
+				EnableCloseAlerts = true;
 				ShowSqueezeBackground = true;
 				ArrowOffsetTicks = 8;
 				LabelOffsetTicks = 12;
+				CloseOffsetTicks = 6;
 
 				BbBrush = Brushes.DodgerBlue;
 				KcBrush = Brushes.Gray;
 				SqueezeBackgroundBrush = Brushes.Goldenrod;
 				LongSignalBrush = Brushes.LimeGreen;
 				ShortSignalBrush = Brushes.Red;
+				CloseSignalBrush = Brushes.Orange;
 
 				AddPlot(new Stroke(Brushes.DodgerBlue, 2), PlotStyle.Line, "BB Upper");
 				AddPlot(new Stroke(Brushes.DodgerBlue, 2), PlotStyle.Line, "BB Lower");
@@ -67,14 +81,19 @@ namespace NinjaTrader.NinjaScript.Indicators
 				AddPlot(new Stroke(Brushes.Gray, DashStyleHelper.Dash, 2), PlotStyle.Line, "KC Lower");
 				AddPlot(new Stroke(Brushes.LimeGreen, 3), PlotStyle.TriangleUp, "Long Marker");
 				AddPlot(new Stroke(Brushes.Red, 3), PlotStyle.TriangleDown, "Short Marker");
+				AddPlot(new Stroke(Brushes.Orange, 3), PlotStyle.Square, "Close Marker");
 			}
 			else if (State == State.Configure)
 			{
 				Plots[4].AutoWidth = true;
 				Plots[5].AutoWidth = true;
+				Plots[6].AutoWidth = true;
 			}
 			else if (State == State.DataLoaded)
 			{
+				tradeState = TradeState.Flat;
+				nextTradeId = 1;
+				openTradeId = 0;
 				signalFont = new SimpleFont("Arial", 14) { Bold = true };
 				bbEmaInd = EMA(BbPeriod);
 				bbStdDevInd = StdDev(BbPeriod);
@@ -105,6 +124,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 			Values[3][0] = kcLower;
 			Values[4][0] = double.NaN;
 			Values[5][0] = double.NaN;
+			Values[6][0] = double.NaN;
 
 			PlotBrushes[0][0] = BbBrush;
 			PlotBrushes[1][0] = BbBrush;
@@ -115,7 +135,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 			bool squeezeOff = IsSqueezeOff(bbUpper, bbLower, kcUpper, kcLower);
 			BackBrush = ShowSqueezeBackground && inNoTradeZone ? SqueezeBackgroundBrush : null;
 
-			if (!ShowSignals)
+			if (!ShowSignals && !ShowCloseSignals)
 				return;
 
 			double hist0 = macdInd.Diff[0];
@@ -147,11 +167,56 @@ namespace NinjaTrader.NinjaScript.Indicators
 				&& histFalling
 				&& !IsShortExhaustion(hist0, hist1, hist2, hist3);
 
-			if (longSignal)
-				DrawLongSignal();
+			if (tradeState == TradeState.Long)
+			{
+				if (ShouldCloseLong(inNoTradeZone, kcUpper, hist0, shortSignal))
+				{
+					if (ShowCloseSignals)
+						DrawCloseSignal(openTradeId);
 
-			if (shortSignal)
-				DrawShortSignal();
+					tradeState = TradeState.Flat;
+					openTradeId = 0;
+				}
+			}
+			else if (tradeState == TradeState.Short)
+			{
+				if (ShouldCloseShort(inNoTradeZone, kcLower, hist0, longSignal))
+				{
+					if (ShowCloseSignals)
+						DrawCloseSignal(openTradeId);
+
+					tradeState = TradeState.Flat;
+					openTradeId = 0;
+				}
+			}
+
+			if (tradeState == TradeState.Flat)
+			{
+				if (longSignal)
+				{
+					openTradeId = nextTradeId++;
+					if (ShowSignals)
+						DrawLongSignal(openTradeId);
+					tradeState = TradeState.Long;
+				}
+				else if (shortSignal)
+				{
+					openTradeId = nextTradeId++;
+					if (ShowSignals)
+						DrawShortSignal(openTradeId);
+					tradeState = TradeState.Short;
+				}
+			}
+		}
+
+		private bool ShouldCloseLong(bool inNoTradeZone, double kcUpper, double hist0, bool shortSignal)
+		{
+			return shortSignal || inNoTradeZone || Close[0] < kcUpper || hist0 <= 0;
+		}
+
+		private bool ShouldCloseShort(bool inNoTradeZone, double kcLower, double hist0, bool longSignal)
+		{
+			return longSignal || inNoTradeZone || Close[0] > kcLower || hist0 >= 0;
 		}
 
 		private bool IsInNoTradeZone(double bbUpper, double bbLower, double kcUpper, double kcLower)
@@ -219,9 +284,9 @@ namespace NinjaTrader.NinjaScript.Indicators
 			return false;
 		}
 
-		private void DrawLongSignal()
+		private void DrawLongSignal(int tradeId)
 		{
-			string tag = "MES500TLong_" + CurrentBar;
+			string tag = "MES500T_" + tradeId + "_Long";
 			double arrowY = Low[0] - (ArrowOffsetTicks * TickSize);
 			double labelY = arrowY - (LabelOffsetTicks * TickSize);
 
@@ -232,18 +297,17 @@ namespace NinjaTrader.NinjaScript.Indicators
 
 			if (ShowSignalLabels)
 			{
-				Draw.Text(this, tag + "_Text", false, "LONG", 0, labelY, 0, LongSignalBrush,
+				Draw.Text(this, tag + "_Text", false, "LONG #" + tradeId, 0, labelY, 0, LongSignalBrush,
 					signalFont, TextAlignment.Center, Brushes.Black, Brushes.White, 100);
-				Draw.Text(this, tag + "_Simple", "LONG", 0, labelY, LongSignalBrush);
 			}
 
 			if (EnableAlerts)
-				Alert(tag, Priority.Medium, "MES500T LONG", "Alert1.wav", 10, Brushes.Transparent, Brushes.Black);
+				Alert(tag, Priority.Medium, "MES500T LONG #" + tradeId, "Alert1.wav", 10, Brushes.Transparent, Brushes.Black);
 		}
 
-		private void DrawShortSignal()
+		private void DrawShortSignal(int tradeId)
 		{
-			string tag = "MES500TShort_" + CurrentBar;
+			string tag = "MES500T_" + tradeId + "_Short";
 			double arrowY = High[0] + (ArrowOffsetTicks * TickSize);
 			double labelY = arrowY + (LabelOffsetTicks * TickSize);
 
@@ -254,13 +318,26 @@ namespace NinjaTrader.NinjaScript.Indicators
 
 			if (ShowSignalLabels)
 			{
-				Draw.Text(this, tag + "_Text", false, "SHORT", 0, labelY, 0, ShortSignalBrush,
+				Draw.Text(this, tag + "_Text", false, "SHORT #" + tradeId, 0, labelY, 0, ShortSignalBrush,
 					signalFont, TextAlignment.Center, Brushes.Black, Brushes.White, 100);
-				Draw.Text(this, tag + "_Simple", "SHORT", 0, labelY, ShortSignalBrush);
 			}
 
 			if (EnableAlerts)
-				Alert(tag, Priority.Medium, "MES500T SHORT", "Alert1.wav", 10, Brushes.Transparent, Brushes.Black);
+				Alert(tag, Priority.Medium, "MES500T SHORT #" + tradeId, "Alert1.wav", 10, Brushes.Transparent, Brushes.Black);
+		}
+
+		private void DrawCloseSignal(int tradeId)
+		{
+			string tag = "MES500T_" + tradeId + "_Close";
+			double markerY = Close[0] + (CloseOffsetTicks * TickSize);
+
+			Values[6][0] = markerY;
+			PlotBrushes[6][0] = CloseSignalBrush;
+
+			Draw.Square(this, tag, false, 0, markerY, CloseSignalBrush);
+
+			if (EnableCloseAlerts)
+				Alert(tag, Priority.Medium, "MES500T CLOSE #" + tradeId, "Alert1.wav", 10, Brushes.Transparent, Brushes.Black);
 		}
 
 		#region Properties
@@ -327,7 +404,15 @@ namespace NinjaTrader.NinjaScript.Indicators
 		public bool ShowSignalLabels { get; set; }
 
 		[NinjaScriptProperty]
-		[Display(Name = "Show Squeeze Background", Order = 7, GroupName = "4. Filters")]
+		[Display(Name = "Show Close Signals", Description = "Značka CLOSE u každého ukončení pozice.", Order = 7, GroupName = "4. Filters")]
+		public bool ShowCloseSignals { get; set; }
+
+		[NinjaScriptProperty]
+		[Display(Name = "Enable Close Alerts", Order = 8, GroupName = "4. Filters")]
+		public bool EnableCloseAlerts { get; set; }
+
+		[NinjaScriptProperty]
+		[Display(Name = "Show Squeeze Background", Order = 9, GroupName = "4. Filters")]
 		public bool ShowSqueezeBackground { get; set; }
 
 		[NinjaScriptProperty]
@@ -340,8 +425,13 @@ namespace NinjaTrader.NinjaScript.Indicators
 		[Display(Name = "Label Offset Ticks", Order = 2, GroupName = "5. Visual")]
 		public int LabelOffsetTicks { get; set; }
 
+		[NinjaScriptProperty]
+		[Range(0, 50)]
+		[Display(Name = "Close Offset Ticks", Order = 3, GroupName = "5. Visual")]
+		public int CloseOffsetTicks { get; set; }
+
 		[XmlIgnore]
-		[Display(Name = "BB Color", Order = 3, GroupName = "5. Visual")]
+		[Display(Name = "BB Color", Order = 4, GroupName = "5. Visual")]
 		public Brush BbBrush { get; set; }
 
 		[Browsable(false)]
@@ -352,7 +442,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 		}
 
 		[XmlIgnore]
-		[Display(Name = "KC Color", Order = 4, GroupName = "5. Visual")]
+		[Display(Name = "KC Color", Order = 5, GroupName = "5. Visual")]
 		public Brush KcBrush { get; set; }
 
 		[Browsable(false)]
@@ -363,7 +453,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 		}
 
 		[XmlIgnore]
-		[Display(Name = "Squeeze Background", Order = 5, GroupName = "5. Visual")]
+		[Display(Name = "Squeeze Background", Order = 6, GroupName = "5. Visual")]
 		public Brush SqueezeBackgroundBrush { get; set; }
 
 		[Browsable(false)]
@@ -374,7 +464,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 		}
 
 		[XmlIgnore]
-		[Display(Name = "Long Signal Color", Order = 6, GroupName = "5. Visual")]
+		[Display(Name = "Long Signal Color", Order = 7, GroupName = "5. Visual")]
 		public Brush LongSignalBrush { get; set; }
 
 		[Browsable(false)]
@@ -385,7 +475,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 		}
 
 		[XmlIgnore]
-		[Display(Name = "Short Signal Color", Order = 7, GroupName = "5. Visual")]
+		[Display(Name = "Short Signal Color", Order = 8, GroupName = "5. Visual")]
 		public Brush ShortSignalBrush { get; set; }
 
 		[Browsable(false)]
@@ -395,6 +485,74 @@ namespace NinjaTrader.NinjaScript.Indicators
 			set { ShortSignalBrush = Serialize.StringToBrush(value); }
 		}
 
+		[XmlIgnore]
+		[Display(Name = "Close Signal Color", Order = 9, GroupName = "5. Visual")]
+		public Brush CloseSignalBrush { get; set; }
+
+		[Browsable(false)]
+		public string CloseSignalBrushSerializable
+		{
+			get { return Serialize.BrushToString(CloseSignalBrush); }
+			set { CloseSignalBrush = Serialize.StringToBrush(value); }
+		}
+
 		#endregion
 	}
 }
+
+#region NinjaScript generated code. Neither change nor remove.
+
+namespace NinjaTrader.NinjaScript.Indicators
+{
+	public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
+	{
+		private MES500TSqueezeMomentum[] cacheMES500TSqueezeMomentum;
+		public MES500TSqueezeMomentum MES500TSqueezeMomentum(int bbPeriod, double bbStdDev, int kcPeriod, double kcMultiplier, int macdFast, int macdSlow, int macdSignal, int tangleSeparationTicks, int tangleSlopeTicks, bool requireThreeBarMomentum, bool enableAlerts, bool showSignals, bool showSignalLabels, bool showCloseSignals, bool enableCloseAlerts, bool showSqueezeBackground, int arrowOffsetTicks, int labelOffsetTicks, int closeOffsetTicks)
+		{
+			return MES500TSqueezeMomentum(Input, bbPeriod, bbStdDev, kcPeriod, kcMultiplier, macdFast, macdSlow, macdSignal, tangleSeparationTicks, tangleSlopeTicks, requireThreeBarMomentum, enableAlerts, showSignals, showSignalLabels, showCloseSignals, enableCloseAlerts, showSqueezeBackground, arrowOffsetTicks, labelOffsetTicks, closeOffsetTicks);
+		}
+
+		public MES500TSqueezeMomentum MES500TSqueezeMomentum(ISeries<double> input, int bbPeriod, double bbStdDev, int kcPeriod, double kcMultiplier, int macdFast, int macdSlow, int macdSignal, int tangleSeparationTicks, int tangleSlopeTicks, bool requireThreeBarMomentum, bool enableAlerts, bool showSignals, bool showSignalLabels, bool showCloseSignals, bool enableCloseAlerts, bool showSqueezeBackground, int arrowOffsetTicks, int labelOffsetTicks, int closeOffsetTicks)
+		{
+			if (cacheMES500TSqueezeMomentum != null)
+				for (int idx = 0; idx < cacheMES500TSqueezeMomentum.Length; idx++)
+					if (cacheMES500TSqueezeMomentum[idx] != null && cacheMES500TSqueezeMomentum[idx].BbPeriod == bbPeriod && cacheMES500TSqueezeMomentum[idx].BbStdDev == bbStdDev && cacheMES500TSqueezeMomentum[idx].KcPeriod == kcPeriod && cacheMES500TSqueezeMomentum[idx].KcMultiplier == kcMultiplier && cacheMES500TSqueezeMomentum[idx].MacdFast == macdFast && cacheMES500TSqueezeMomentum[idx].MacdSlow == macdSlow && cacheMES500TSqueezeMomentum[idx].MacdSignal == macdSignal && cacheMES500TSqueezeMomentum[idx].TangleSeparationTicks == tangleSeparationTicks && cacheMES500TSqueezeMomentum[idx].TangleSlopeTicks == tangleSlopeTicks && cacheMES500TSqueezeMomentum[idx].RequireThreeBarMomentum == requireThreeBarMomentum && cacheMES500TSqueezeMomentum[idx].EnableAlerts == enableAlerts && cacheMES500TSqueezeMomentum[idx].ShowSignals == showSignals && cacheMES500TSqueezeMomentum[idx].ShowSignalLabels == showSignalLabels && cacheMES500TSqueezeMomentum[idx].ShowCloseSignals == showCloseSignals && cacheMES500TSqueezeMomentum[idx].EnableCloseAlerts == enableCloseAlerts && cacheMES500TSqueezeMomentum[idx].ShowSqueezeBackground == showSqueezeBackground && cacheMES500TSqueezeMomentum[idx].ArrowOffsetTicks == arrowOffsetTicks && cacheMES500TSqueezeMomentum[idx].LabelOffsetTicks == labelOffsetTicks && cacheMES500TSqueezeMomentum[idx].CloseOffsetTicks == closeOffsetTicks && cacheMES500TSqueezeMomentum[idx].EqualsInput(input))
+						return cacheMES500TSqueezeMomentum[idx];
+			return CacheIndicator<MES500TSqueezeMomentum>(new MES500TSqueezeMomentum(){ BbPeriod = bbPeriod, BbStdDev = bbStdDev, KcPeriod = kcPeriod, KcMultiplier = kcMultiplier, MacdFast = macdFast, MacdSlow = macdSlow, MacdSignal = macdSignal, TangleSeparationTicks = tangleSeparationTicks, TangleSlopeTicks = tangleSlopeTicks, RequireThreeBarMomentum = requireThreeBarMomentum, EnableAlerts = enableAlerts, ShowSignals = showSignals, ShowSignalLabels = showSignalLabels, ShowCloseSignals = showCloseSignals, EnableCloseAlerts = enableCloseAlerts, ShowSqueezeBackground = showSqueezeBackground, ArrowOffsetTicks = arrowOffsetTicks, LabelOffsetTicks = labelOffsetTicks, CloseOffsetTicks = closeOffsetTicks }, input, ref cacheMES500TSqueezeMomentum);
+		}
+	}
+}
+
+namespace NinjaTrader.NinjaScript.MarketAnalyzerColumns
+{
+	public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
+	{
+		public Indicators.MES500TSqueezeMomentum MES500TSqueezeMomentum(int bbPeriod, double bbStdDev, int kcPeriod, double kcMultiplier, int macdFast, int macdSlow, int macdSignal, int tangleSeparationTicks, int tangleSlopeTicks, bool requireThreeBarMomentum, bool enableAlerts, bool showSignals, bool showSignalLabels, bool showCloseSignals, bool enableCloseAlerts, bool showSqueezeBackground, int arrowOffsetTicks, int labelOffsetTicks, int closeOffsetTicks)
+		{
+			return indicator.MES500TSqueezeMomentum(Input, bbPeriod, bbStdDev, kcPeriod, kcMultiplier, macdFast, macdSlow, macdSignal, tangleSeparationTicks, tangleSlopeTicks, requireThreeBarMomentum, enableAlerts, showSignals, showSignalLabels, showCloseSignals, enableCloseAlerts, showSqueezeBackground, arrowOffsetTicks, labelOffsetTicks, closeOffsetTicks);
+		}
+
+		public Indicators.MES500TSqueezeMomentum MES500TSqueezeMomentum(ISeries<double> input , int bbPeriod, double bbStdDev, int kcPeriod, double kcMultiplier, int macdFast, int macdSlow, int macdSignal, int tangleSeparationTicks, int tangleSlopeTicks, bool requireThreeBarMomentum, bool enableAlerts, bool showSignals, bool showSignalLabels, bool showCloseSignals, bool enableCloseAlerts, bool showSqueezeBackground, int arrowOffsetTicks, int labelOffsetTicks, int closeOffsetTicks)
+		{
+			return indicator.MES500TSqueezeMomentum(input, bbPeriod, bbStdDev, kcPeriod, kcMultiplier, macdFast, macdSlow, macdSignal, tangleSeparationTicks, tangleSlopeTicks, requireThreeBarMomentum, enableAlerts, showSignals, showSignalLabels, showCloseSignals, enableCloseAlerts, showSqueezeBackground, arrowOffsetTicks, labelOffsetTicks, closeOffsetTicks);
+		}
+	}
+}
+
+namespace NinjaTrader.NinjaScript.Strategies
+{
+	public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
+	{
+		public Indicators.MES500TSqueezeMomentum MES500TSqueezeMomentum(int bbPeriod, double bbStdDev, int kcPeriod, double kcMultiplier, int macdFast, int macdSlow, int macdSignal, int tangleSeparationTicks, int tangleSlopeTicks, bool requireThreeBarMomentum, bool enableAlerts, bool showSignals, bool showSignalLabels, bool showCloseSignals, bool enableCloseAlerts, bool showSqueezeBackground, int arrowOffsetTicks, int labelOffsetTicks, int closeOffsetTicks)
+		{
+			return indicator.MES500TSqueezeMomentum(Input, bbPeriod, bbStdDev, kcPeriod, kcMultiplier, macdFast, macdSlow, macdSignal, tangleSeparationTicks, tangleSlopeTicks, requireThreeBarMomentum, enableAlerts, showSignals, showSignalLabels, showCloseSignals, enableCloseAlerts, showSqueezeBackground, arrowOffsetTicks, labelOffsetTicks, closeOffsetTicks);
+		}
+
+		public Indicators.MES500TSqueezeMomentum MES500TSqueezeMomentum(ISeries<double> input , int bbPeriod, double bbStdDev, int kcPeriod, double kcMultiplier, int macdFast, int macdSlow, int macdSignal, int tangleSeparationTicks, int tangleSlopeTicks, bool requireThreeBarMomentum, bool enableAlerts, bool showSignals, bool showSignalLabels, bool showCloseSignals, bool enableCloseAlerts, bool showSqueezeBackground, int arrowOffsetTicks, int labelOffsetTicks, int closeOffsetTicks)
+		{
+			return indicator.MES500TSqueezeMomentum(input, bbPeriod, bbStdDev, kcPeriod, kcMultiplier, macdFast, macdSlow, macdSignal, tangleSeparationTicks, tangleSlopeTicks, requireThreeBarMomentum, enableAlerts, showSignals, showSignalLabels, showCloseSignals, enableCloseAlerts, showSqueezeBackground, arrowOffsetTicks, labelOffsetTicks, closeOffsetTicks);
+		}
+	}
+}
+
+#endregion
