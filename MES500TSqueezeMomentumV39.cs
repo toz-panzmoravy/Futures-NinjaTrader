@@ -813,7 +813,10 @@ namespace NinjaTrader.NinjaScript.Indicators
 			if (tradeState == TradeState.Long)
 			{
 				if (IsFirstTickOfBar)
+				{
 					barsInTrade++;
+					RestoreOpenEntryMarkerIfVoided();
+				}
 
 				UpdateLongTrail(atr);
 				UpdateMaxFavorable(true);
@@ -841,7 +844,10 @@ namespace NinjaTrader.NinjaScript.Indicators
 			else if (tradeState == TradeState.Short)
 			{
 				if (IsFirstTickOfBar)
+				{
 					barsInTrade++;
+					RestoreOpenEntryMarkerIfVoided();
+				}
 
 				UpdateShortTrail(atr);
 				UpdateMaxFavorable(false);
@@ -3013,8 +3019,16 @@ namespace NinjaTrader.NinjaScript.Indicators
 					continue;
 				}
 
-				if (tradeState != TradeState.Flat && sig.Bar == openEntryBar && barsInTrade < SignalMinBarsBeforeReview)
+				if (tradeState != TradeState.Flat && !sig.IsApproach && sig.TradeId == openTradeId)
+				{
+					if (sig.WasReEntry && !sig.QualifiedReEntry)
+					{
+						CorrectEntryLabel(sig, barsAgo, false);
+						sig.QualifiedReEntry = true;
+						changed = true;
+					}
 					continue;
+				}
 
 				bool logicOk = IsEntryLogicStillValid(sig, barsAgo);
 				bool priceOk = IsEntryConfirmedByPrice(sig, barsAgo);
@@ -3029,6 +3043,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 				if (sig.WasReEntry && !sig.QualifiedReEntry)
 				{
 					CorrectEntryLabel(sig, barsAgo, false);
+					sig.QualifiedReEntry = true;
 					changed = true;
 				}
 			}
@@ -3063,6 +3078,38 @@ namespace NinjaTrader.NinjaScript.Indicators
 				return false;
 
 			return UseIntrabarExits || shortKcBreakBars >= KcBreakConfirmBars;
+		}
+
+		private void RestoreOpenEntryMarkerIfVoided()
+		{
+			if (tradeState == TradeState.Flat || openTradeId <= 0)
+				return;
+
+			int barsAgo = CurrentBar - openEntryBar;
+			if (barsAgo < 0 || barsAgo > CurrentBar)
+				return;
+
+			PostedSignal entrySig = null;
+			for (int i = 0; i < postedSignals.Count; i++)
+			{
+				PostedSignal sig = postedSignals[i];
+				if (!sig.IsApproach && sig.TradeId == openTradeId && sig.Bar == openEntryBar)
+				{
+					entrySig = sig;
+					break;
+				}
+			}
+
+			if (entrySig == null || !entrySig.Voided)
+				return;
+
+			entrySig.Voided = false;
+			if (tradeState == TradeState.Long)
+				DrawLongSignal(openTradeId, openEntryTrigger, barsAgo, true);
+			else
+				DrawShortSignal(openTradeId, openEntryTrigger, barsAgo, true);
+
+			RequestChartRefresh();
 		}
 
 		private void OpenTrade(bool isLong, EntryTrigger trigger, int barsAgo = 0, double entryPrice = 0)
@@ -4422,13 +4469,14 @@ namespace NinjaTrader.NinjaScript.Indicators
 				TryShowScreenPopup("EntryHint_" + CurrentBar + (isLong ? "_L" : "_S"), label, hint, isLong ? Colors.LimeGreen : Colors.OrangeRed);
 		}
 
-		private void DrawLongSignal(int tradeId, EntryTrigger trigger, int barsAgo = 0)
+		private void DrawLongSignal(int tradeId, EntryTrigger trigger, int barsAgo = 0, bool silent = false)
 		{
 			string tag = "MES500TV39_" + tradeId + "_Long";
 			double arrowY = Low[barsAgo] - (ArrowOffsetTicks * TickSize);
 			double labelY = arrowY - (LabelOffsetTicks * TickSize);
 			bool chopRisk = ShowTradeCharacter && trigger == EntryTrigger.Continuation && openSignalGrade == SignalGrade.C;
-			string label = BuildEntryMainLabel(true, IsLongReEntryEntry(), tradeId);
+			bool isReEntry = openTradeId == tradeId ? openIsReEntry : IsLongReEntryEntry();
+			string label = BuildEntryMainLabel(true, isReEntry, tradeId);
 			string subLabel = BuildEntrySubLabel(trigger, openSignalGrade, chopRisk);
 			string hint = BuildEntryHint(true, trigger, openSignalGrade);
 			string fullLabel = label;
@@ -4455,7 +4503,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 					signalFont, TextAlignment.Center, Brushes.Black, Brushes.White, 100);
 			}
 
-			if (EnableAlerts)
+			if (!silent && EnableAlerts)
 			{
 				string alertSound = GetEntryAlertSound(openSignalGrade, trigger);
 				Alert(tag, Priority.Medium, BuildEntryAlertText(true, tradeId, openSignalGrade, trigger), alertSound, 10, Brushes.Transparent, Brushes.Black);
@@ -4463,20 +4511,21 @@ namespace NinjaTrader.NinjaScript.Indicators
 					FlashTaskbar();
 			}
 
-			if (PopupOnEntry && barsAgo == 0)
+			if (!silent && PopupOnEntry && barsAgo == 0)
 				TryShowScreenPopup("EntryLong_" + tradeId, label, hint, Colors.LimeGreen);
 
-			RegisterPostedEntry(tradeId, true, barsAgo, trigger, openSignalGrade, IsLongReEntryEntry(), tag,
+			RegisterPostedEntry(tradeId, true, barsAgo, trigger, openSignalGrade, isReEntry, tag,
 				barsAgo <= CurrentBar ? Close[barsAgo] : Close[0]);
 		}
 
-		private void DrawShortSignal(int tradeId, EntryTrigger trigger, int barsAgo = 0)
+		private void DrawShortSignal(int tradeId, EntryTrigger trigger, int barsAgo = 0, bool silent = false)
 		{
 			string tag = "MES500TV39_" + tradeId + "_Short";
 			double arrowY = High[barsAgo] + (ArrowOffsetTicks * TickSize);
 			double labelY = arrowY + (LabelOffsetTicks * TickSize);
 			bool chopRisk = ShowTradeCharacter && trigger == EntryTrigger.Continuation && openSignalGrade == SignalGrade.C;
-			string label = BuildEntryMainLabel(false, IsShortReEntryEntry(), tradeId);
+			bool isReEntry = openTradeId == tradeId ? openIsReEntry : IsShortReEntryEntry();
+			string label = BuildEntryMainLabel(false, isReEntry, tradeId);
 			string subLabel = BuildEntrySubLabel(trigger, openSignalGrade, chopRisk);
 			string hint = BuildEntryHint(false, trigger, openSignalGrade);
 			string fullLabel = label;
@@ -4503,7 +4552,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 					signalFont, TextAlignment.Center, Brushes.Black, Brushes.White, 100);
 			}
 
-			if (EnableAlerts)
+			if (!silent && EnableAlerts)
 			{
 				string alertSound = GetEntryAlertSound(openSignalGrade, trigger);
 				Alert(tag, Priority.Medium, BuildEntryAlertText(false, tradeId, openSignalGrade, trigger), alertSound, 10, Brushes.Transparent, Brushes.Black);
@@ -4511,10 +4560,10 @@ namespace NinjaTrader.NinjaScript.Indicators
 					FlashTaskbar();
 			}
 
-			if (PopupOnEntry && barsAgo == 0)
+			if (!silent && PopupOnEntry && barsAgo == 0)
 				TryShowScreenPopup("EntryShort_" + tradeId, label, hint, Colors.OrangeRed);
 
-			RegisterPostedEntry(tradeId, false, barsAgo, trigger, openSignalGrade, IsShortReEntryEntry(), tag,
+			RegisterPostedEntry(tradeId, false, barsAgo, trigger, openSignalGrade, isReEntry, tag,
 				barsAgo <= CurrentBar ? Close[barsAgo] : Close[0]);
 		}
 
