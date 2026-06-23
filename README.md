@@ -1,24 +1,42 @@
-# Futures-NinjaTrader
+# Futures-NinjaTrader — MES500T Squeeze Momentum
 
-NinjaTrader 8 automatické obchodní systémy (AOS) pro futures prop-trading.
+Indikátory pro **NinjaTrader 8** a ruční obchodování **MES** na **500 tick** grafech (squeeze + KC pásma + momentum).
 
-**GitHub:** [toz-panzmoravy/Futures-NinjaTrader](https://github.com/toz-panzmoravy/Futures-NinjaTrader)
+**Repozitář:** [github.com/toz-panzmoravy/Futures-NinjaTrader](https://github.com/toz-panzmoravy/Futures-NinjaTrader)
 
-## Strategie
+## Soubory
 
-| Složka | Instrument | Strategie | Verze |
-|--------|------------|-----------|-------|
-| [`MES/`](MES/) | MES | Microtrend Prop (TICK 200) | **v1.0.4** |
-| [`MNQ/`](MNQ/) | MNQ | Microtrend Prop (PullbackBreak L+S) | **v1.0.5** |
+| Soubor | Účel |
+|--------|------|
+| `MES500TSqueezeMomentumV38.cs` | **Aktuální verze** — band reversal u KC pásma, exit assessment (Korekce % / ZAVŘÍT TEĎ), trend runner z V37 |
+| `MES500TSqueezeMomentumV36.cs` | Plná V36 — panel situace, popup, approach ring, ruční režim |
+| `MES500TSqueezeMomentumV36Light.cs` | Lehká V36 — stejná logika signálů, méně kreslení (vhodné pro slabší PC) |
 
-Detailní instalace: **[MES/README.md](MES/README.md)** · **[MNQ/README.md](MNQ/README.md)**
+Starší verze (V31–V37) nejsou v repozitáři — vývoj pokračuje jen ve V38; V36/V36Light zůstávají jako reference / fallback.
 
 ## Instalace
 
-1. Zkopíruj `.cs` soubor strategie do `Documents\NinjaTrader 8\bin\Custom\Strategies\`
+1. Zkopíruj požadovaný `.cs` soubor do:
+   ```
+   Documents\NinjaTrader 8\bin\Custom\Indicators\
+   ```
 2. NinjaScript Editor → **F5** (Compile)
-3. Připoj strategii na **MES** nebo **MNQ TICK 200** graf
+3. Na graf **MES** (500 tick) přidej indikátor:
+   - doporučeno: **MES500TSqueezeMomentumV38**
+   - alternativa: V36 nebo V36Light
 
-## Release workflow
+## Kterou verzi zvolit
 
-Verzování, tagy a push na GitHub: **[RELEASE.md](RELEASE.md)**
+- **V38** — signály u horního/dolního KC pásma (reversal), srozumitelné NÁKUP/PRODEJ/ZAVŘÍT, procenta u exitu
+- **V36** — plný UI (panel, popup, ring), ruční trading
+- **V36 Light** — jako V36, ale bez popupu a s omezenou historií značek na grafu
+
+## Požadavky
+
+- NinjaTrader 8
+- Instrument: **MES** (Micro E-mini S&P 500)
+- Doporučený graf: **500 tick**
+
+## Licence
+
+Soukromý projekt — použití na vlastní odpovědnost.

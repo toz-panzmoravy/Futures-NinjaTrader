@@ -1,21 +1,5 @@
-# NinjaTrader backtest / optimization exports
-**/Exports/
-*.csv
-
-# Sensitive
-.env
-.env.*
-*credentials*
-*secrets*
-
-# Build / IDE
-bin/
-obj/
-.vs/
+Thumbs.db
+Desktop.ini
 *.user
 *.suo
-
-# OS
-.DS_Store
-Thumbs.db
-desktop.ini
+.vs/
