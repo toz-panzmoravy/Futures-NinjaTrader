@@ -10,7 +10,7 @@ Indikátory pro **NinjaTrader 8** a ruční obchodování **MES** na **500 tick*
 |--------|------|
 | `MES500TSqueezeMomentumV39.cs` | **Aktuální plná verze** — jasné vstupy NÁKUP/PRODEJ (trend leg uprostřed trendu + band reversal u KC pásma), exit assessment, trend runner |
 | `MES500TSqueezeMomentumV39Light.cs` | **Aktuální lehká verze** — stejná logika jako V39, méně kreslení (vhodné pro slabší PC) |
-| `MES500TDashboard.cs` | **Sub-panel Dashboard** — samostatné okno pod grafem; 6 pruhů: síla nákupního/prodejního trendu, MACD momentum, squeeze komprese, approach skóre BUY/SELL + textový souhrn |
+| `MES500TDashboard.cs` | **Sub-panel Dashboard** — Trend Phase (fáze trendu), Entry Score (vhodnost vstupu), šipky startu trendu, PEAK markery u vrcholu |
 | `MES500TSqueezeMomentumV38.cs` | Plná V38 — band reversal u KC pásma, exit assessment (Korekce % / ZAVŘÍT TEĎ), trend runner z V37 |
 | `MES500TSqueezeMomentumV38Light.cs` | Lehká V38 — stejná logika jako V38, méně kreslení |
 | `MES500TSqueezeMomentumV36.cs` | Plná V36 — panel situace, popup, approach ring, ruční režim |
@@ -40,22 +40,45 @@ Starší verze (V31–V37) nejsou v repozitáři — doporučené jsou **V39 / V
 
 ## MES500TDashboard — co zobrazuje
 
-Dashboard je **samostatný indikátor** přidaný do nového sub-panelu pod grafem. Používá stejné parametry BB/KC/MACD jako V39.
+Dashboard je **samostatný indikátor** v sub-panelu pod grafem. Doplňuje V39 — neříká „vstup hned“, ale **v jaké fázi je trend** a **kdy zvažovat exit**.
 
-| Pruh | Rozsah | Popis |
-|------|--------|-------|
-| **Síla Nákup** (zelená) | 0–100 | Jak silný je nákupní trend: KC slope + cena nad KC mid + MACD kladný + momentum roste |
-| **Síla Prodej** (červená) | 0–(−100) | Stejné pro prodejní trend, vykresleno pod nulou |
-| **Momentum** (modrá) | −100–+100 | Normalizovaný MACD histogram: roste ↑ zelená, klesá ↓ červená |
-| **Squeeze** (žlutá) | 0 / 50 / 100 | 0 = off, 50 = partial, 100 = full squeeze — čekej na výstřel |
-| **Approach BUY** (čára) | 0–100 | Skóre pravděpodobnosti blízkého vstupu na nákup (0–7 podmínek) |
-| **Approach SELL** (čára) | 0–(−100) | Totéž pro prodej |
+### 3 pruhy
 
-Navíc textový popis v levém dolním rohu sub-panelu (lze vypnout `Show Status Text = false`).
+| Pruh | Popis |
+|------|-------|
+| **TrendPhase** (sloupec) | Výška = fáze trendu. Nad nulou = nákup, pod nulou = prodej |
+| **EntryScore** (čára 0–100) | Vhodnost vstupu právě teď (jen ve fázích FORMING/ACTIVE) |
+| **Nula** | referenční linka |
 
-### Nastavení Dashboardu — musí odpovídat V39
+### Fáze trendu (Trend Phase)
 
-Zkontroluj, že tyto parametry jsou stejné jako ve V39:
+| Fáze | Výška | Barva | Význam |
+|------|-------|-------|--------|
+| FLAT | 0 | šedá | bez trendu, squeeze nebo tangle |
+| FORMING | 30 | žlutá | trend začíná |
+| ACTIVE | 85 | zelená/červená | silný trend běží |
+| MATURE | 50 | tlumená | trend pokračuje, momentum slábne |
+| FADING | 20 | oranžová | trend končí — zvaž zavření |
+
+### Značky na panelu
+
+| Značka | Kdy |
+|--------|-----|
+| **↑ zelená šipka** | FLAT → FORMING nebo ACTIVE (start nákupního trendu) |
+| **↓ červená šipka** | FLAT → FORMING nebo ACTIVE (start prodejního trendu) |
+| **PEAK** (žlutá) | ACTIVE → MATURE/FADING — retroaktivně u svíčky s nejvyšším Entry Score |
+
+### Entry Score
+
+| Hodnota | Význam |
+|---------|--------|
+| **70+** | vhodné vstoupit (zelená) |
+| **40–70** | slabší setup (žlutá) |
+| **pod 40** | nevhodné (šedá) |
+
+Textový souhrn vlevo dole (fáze, entry score, squeeze, varování).
+
+### Nastavení — musí odpovídat V39
 
 | Parametr | Výchozí |
 |----------|---------|

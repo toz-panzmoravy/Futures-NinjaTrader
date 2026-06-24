@@ -14,60 +14,73 @@ using NinjaTrader.NinjaScript.Indicators;
 namespace NinjaTrader.NinjaScript.Indicators
 {
 	/// <summary>
-	/// MES500T Dashboard — sub-panel pod grafem.
-	/// Zobrazuje v 7 pruzích: sílu nákupního trendu, sílu prodejního trendu,
-	/// MACD histogram (momentum), squeeze komprese, approach skóre (BUY/SELL),
-	/// exit korekce a jistotu exitu — vše odvozeno ze stejných parametrů jako V39.
+	/// MES500T Dashboard — sub-panel: Trend Phase, Entry Score, Peak markery.
+	/// Odvozeno ze stejných KC/BB/MACD parametrů jako V39.
 	/// </summary>
 	public class MES500TDashboard : Indicator
 	{
-		// ── indikátory ──────────────────────────────────────────────────────────
+		private enum TrendPhase
+		{
+			Flat,
+			Forming,
+			Active,
+			Mature,
+			Fading
+		}
+
+		private enum TrendDirection
+		{
+			None,
+			Long,
+			Short
+		}
+
+		private const int MAX_APPROACH = 7;
+		private const int PEAK_LOOKBACK = 5;
+
 		private EMA    bbEmaInd;
 		private StdDev bbStdDevInd;
 		private EMA    kcEmaInd;
 		private ATR    kcAtrInd;
 		private MACD   macdInd;
 
-		// ── konstanty pásem ─────────────────────────────────────────────────────
-		private const int MAX_SCORE    = 7;   // max approach score ve V39
-		private const int HIST_SCALE   = 40;  // body pro normalizaci histogramu → ±100
-
-		// ── barvy pruhů ─────────────────────────────────────────────────────────
 		private Brush brushBullStrong;
 		private Brush brushBullWeak;
 		private Brush brushBearStrong;
 		private Brush brushBearWeak;
 		private Brush brushNeutral;
-		private Brush brushSqueeze;
-		private Brush brushExitWarn;
+		private Brush brushForming;
+		private Brush brushFading;
+		private Brush brushEntryGood;
+		private Brush brushEntryMid;
+		private Brush brushEntryLow;
 		private Brush brushZero;
 		private SimpleFont labelFont;
+		private SimpleFont markerFont;
 
-		// ────────────────────────────────────────────────────────────────────────
-		//  PLOTS — pořadí musí souhlasit s AddPlot() v OnStateChange
-		// ────────────────────────────────────────────────────────────────────────
-		// 0  TrendSilaBuy    — síla nákupního trendu  0‥100
-		// 1  TrendSilaSell   — síla prodejního trendu 0‥100  (kladná = silný SELL)
-		// 2  MomentumHist    — MACD histogram normalizovaný  –100‥+100
-		// 3  SqueezeLine     — komprese BB/KC  0 = off, 50 = partial, 100 = full
-		// 4  ApproachBuy     — approach skóre BUY   0‥100
-		// 5  ApproachSell    — approach skóre SELL  0‥100 (kladná)
-		// 6  Nulová linka    — stálá 0
+		private TrendPhase priorBullPhase;
+		private TrendPhase priorBearPhase;
+		private TrendDirection activeDirection;
+
+		private Series<double> entryScoreHistory;
+
+		// Plot 0: TrendPhase (signed bar)
+		// Plot 1: EntryScore (0–100 line)
+		// Plot 2: Zero line
 
 		protected override void OnStateChange()
 		{
 			if (State == State.SetDefaults)
 			{
-				Description = "MES500T Dashboard — sub-panel: síla trendu, momentum, squeeze, approach skóre.";
+				Description = "MES500T Dashboard — Trend Phase, Entry Score, Peak markery (sub-panel).";
 				Name        = "MES500TDashboard";
 				Calculate   = Calculate.OnBarClose;
-				IsOverlay   = false;    // ← vlastní sub-panel
-				DisplayInDataBox    = true;
-				DrawOnPricePanel    = false;
+				IsOverlay   = false;
+				DisplayInDataBox = true;
+				DrawOnPricePanel = false;
 				IsSuspendedWhileInactive = true;
-				BarsRequiredToPlot  = 25;
+				BarsRequiredToPlot = 25;
 
-				// parametry pásem — musí odpovídat V39
 				BbPeriod       = 20;
 				BbStdDev       = 2.0;
 				KcPeriod       = 20;
@@ -76,21 +89,22 @@ namespace NinjaTrader.NinjaScript.Indicators
 				MacdSlow       = 13;
 				MacdSignal     = 9;
 
-			EntryBufferTicks      = 1;
-			ApproachNearTicks     = 10;
-			RequireThreeBarMomentum = false;
+				EntryBufferTicks        = 1;
+				ApproachNearTicks         = 10;
+				RequireThreeBarMomentum   = false;
+				ShowStatusText            = true;
+				ShowTrendStartArrows      = true;
+				ShowPeakMarkers           = true;
+				MomentumFadeBars          = 2;
+				PeakLookbackBars          = 5;
 
-			AddPlot(new Stroke(Brushes.LimeGreen,    2), PlotStyle.Bar,    "SílaNákup");
-				AddPlot(new Stroke(Brushes.OrangeRed,    2), PlotStyle.Bar,    "SílaProdej");
-				AddPlot(new Stroke(Brushes.DodgerBlue,   1), PlotStyle.Bar,    "Momentum");
-				AddPlot(new Stroke(Brushes.Gold,         2), PlotStyle.Bar,    "Squeeze");
-				AddPlot(new Stroke(Brushes.SpringGreen,  1), PlotStyle.Line,   "ApproachBuy");
-				AddPlot(new Stroke(Brushes.Tomato,       1), PlotStyle.Line,   "ApproachSell");
-				AddPlot(new Stroke(Brushes.Gray,         1), PlotStyle.Line,   "Nula");
+				AddPlot(new Stroke(Brushes.LimeGreen, 2), PlotStyle.Bar,  "TrendPhase");
+				AddPlot(new Stroke(Brushes.DodgerBlue, 2), PlotStyle.Line, "EntryScore");
+				AddPlot(new Stroke(Brushes.Gray,       1), PlotStyle.Line, "Nula");
 
-			AddLine(new Stroke(Brushes.DimGray,  1), 0,   "Nula");
-			AddLine(new Stroke(Brushes.DimGray,  1), 50,  "Střed");
-			AddLine(new Stroke(Brushes.DimGray,  1), -50, "StředNeg");
+				AddLine(new Stroke(Brushes.DimGray, 1), 0,  "Nula");
+				AddLine(new Stroke(Brushes.DimGray, 1), 70, "EntrySilny");
+				AddLine(new Stroke(Brushes.DimGray, 1), 40, "EntrySlaby");
 			}
 			else if (State == State.Configure)
 			{
@@ -100,9 +114,9 @@ namespace NinjaTrader.NinjaScript.Indicators
 				kcAtrInd    = ATR(KcPeriod);
 				macdInd     = MACD(MacdFast, MacdSlow, MacdSignal);
 
-				brushBullStrong = new SolidColorBrush(Color.FromRgb(0,  220, 80));
+				brushBullStrong = new SolidColorBrush(Color.FromRgb(0, 220, 80));
 				brushBullStrong.Freeze();
-				brushBullWeak   = new SolidColorBrush(Color.FromRgb(0,  140, 50));
+				brushBullWeak   = new SolidColorBrush(Color.FromRgb(0, 140, 50));
 				brushBullWeak.Freeze();
 				brushBearStrong = new SolidColorBrush(Color.FromRgb(220, 50, 30));
 				brushBearStrong.Freeze();
@@ -110,14 +124,28 @@ namespace NinjaTrader.NinjaScript.Indicators
 				brushBearWeak.Freeze();
 				brushNeutral    = new SolidColorBrush(Color.FromRgb(100, 100, 100));
 				brushNeutral.Freeze();
-				brushSqueeze    = new SolidColorBrush(Color.FromRgb(255, 200, 0));
-				brushSqueeze.Freeze();
-				brushExitWarn   = new SolidColorBrush(Color.FromRgb(255, 100, 0));
-				brushExitWarn.Freeze();
-				brushZero       = new SolidColorBrush(Color.FromRgb(60,  60,  60));
+				brushForming    = new SolidColorBrush(Color.FromRgb(255, 200, 0));
+				brushForming.Freeze();
+				brushFading     = new SolidColorBrush(Color.FromRgb(255, 120, 0));
+				brushFading.Freeze();
+				brushEntryGood  = new SolidColorBrush(Color.FromRgb(0, 200, 80));
+				brushEntryGood.Freeze();
+				brushEntryMid   = new SolidColorBrush(Color.FromRgb(255, 200, 0));
+				brushEntryMid.Freeze();
+				brushEntryLow   = new SolidColorBrush(Color.FromRgb(120, 120, 120));
+				brushEntryLow.Freeze();
+				brushZero       = new SolidColorBrush(Color.FromRgb(60, 60, 60));
 				brushZero.Freeze();
 
-				labelFont = new SimpleFont("Arial", 9);
+				labelFont  = new SimpleFont("Arial", 9);
+				markerFont = new SimpleFont("Arial", 8) { Bold = true };
+			}
+			else if (State == State.DataLoaded)
+			{
+				entryScoreHistory = new Series<double>(this);
+				priorBullPhase    = TrendPhase.Flat;
+				priorBearPhase    = TrendPhase.Flat;
+				activeDirection   = TrendDirection.None;
 			}
 		}
 
@@ -126,144 +154,472 @@ namespace NinjaTrader.NinjaScript.Indicators
 			if (CurrentBar < BarsRequiredToPlot)
 				return;
 
-			// ── pásma ────────────────────────────────────────────────────────────
 			double bbMid   = bbEmaInd[0];
 			double stdDev  = bbStdDevInd[0];
 			double bbUpper = bbMid + BbStdDev * stdDev;
 			double bbLower = bbMid - BbStdDev * stdDev;
 
 			double kcMid   = kcEmaInd[0];
-			double atr     = kcAtrInd[0];
-			double kcUpper = kcMid + KcMultiplier * atr;
-			double kcLower = kcMid - KcMultiplier * atr;
-			double buf     = EntryBufferTicks * TickSize;
+			double kcUpper = kcMid + KcMultiplier * kcAtrInd[0];
+			double kcLower = kcMid - KcMultiplier * kcAtrInd[0];
 			double near    = ApproachNearTicks * TickSize;
 
-			// ── MACD histogram ───────────────────────────────────────────────────
 			double hist0 = macdInd.Diff[0];
 			double hist1 = CurrentBar >= 1 ? macdInd.Diff[1] : hist0;
 			double hist2 = CurrentBar >= 2 ? macdInd.Diff[2] : hist1;
 			double hist3 = CurrentBar >= 3 ? macdInd.Diff[3] : hist2;
 
-			// ── squeeze ──────────────────────────────────────────────────────────
 			bool fullSqueeze    = bbUpper <= kcUpper && bbLower >= kcLower;
 			bool partialSqueeze = !fullSqueeze && ((bbUpper <= kcUpper && bbUpper >= kcLower)
 			                                     || (bbLower >= kcLower && bbLower <= kcUpper));
-
-			// ── KC slope — počet svíček po sobě jdoucích ─────────────────────────
-			int bullSlopeCount = 0;
-			int bearSlopeCount = 0;
-			for (int i = 0; i < 8 && i + 1 <= CurrentBar; i++)
-			{
-				if (kcEmaInd[i] > kcEmaInd[i + 1])
-					bullSlopeCount++;
-				else
-					break;
-			}
-			for (int i = 0; i < 8 && i + 1 <= CurrentBar; i++)
-			{
-				if (kcEmaInd[i] < kcEmaInd[i + 1])
-					bearSlopeCount++;
-				else
-					break;
-			}
-
-			// ── momentum síla (exhaustion check) ─────────────────────────────────
+			bool macdTangle     = IsMacdTangle();
 			bool longExhaustion  = IsLongExhaustion(hist0, hist1, hist2, hist3);
 			bool shortExhaustion = IsShortExhaustion(hist0, hist1, hist2, hist3);
-			bool macdTangle      = IsMacdTangle();
 
-			// ── Síla nákupního trendu 0-100 ──────────────────────────────────────
-			double buyStrength = 0;
-			// KC mid roste → základ trendu
-			buyStrength += Math.Min(8, bullSlopeCount) * 8.0;          // max 64
-			// cena nad KC mid
-			if (Close[0] > kcMid)   buyStrength += 12;
-			// MACD kladný
-			if (hist0 > 0)           buyStrength += 10;
-			// momentum roste
-			if (hist0 > hist1)       buyStrength += 8;
-			// bez exhauscion
-			if (!longExhaustion)     buyStrength += 6;
-			// Celkem max cca 100; zkrátíme
-			buyStrength = Math.Min(100, buyStrength);
-			// Pokud squeeze nebo tangle → snížit
-			if (fullSqueeze || macdTangle) buyStrength *= 0.5;
-			if (shortExhaustion)           buyStrength *= 0.3;
+			int bullSlopeCount = CountKcSlopeBars(true);
+			int bearSlopeCount = CountKcSlopeBars(false);
+			int longFadeBars   = CountMomentumFadeBars(true);
+			int shortFadeBars  = CountMomentumFadeBars(false);
 
-			// ── Síla prodejního trendu 0-100 (zobrazena záporně) ─────────────────
-			double sellStrength = 0;
-			sellStrength += Math.Min(8, bearSlopeCount) * 8.0;
-			if (Close[0] < kcMid)    sellStrength += 12;
-			if (hist0 < 0)            sellStrength += 10;
-			if (hist0 < hist1)        sellStrength += 8;
-			if (!shortExhaustion)     sellStrength += 6;
-			sellStrength = Math.Min(100, sellStrength);
-			if (fullSqueeze || macdTangle) sellStrength *= 0.5;
-			if (longExhaustion)            sellStrength *= 0.3;
+			int approachLongRaw  = CountApproachScore(true, fullSqueeze, macdTangle, longExhaustion, bullSlopeCount, kcMid, kcUpper, kcLower, near, hist0, hist1, hist2);
+			int approachShortRaw = CountApproachScore(false, fullSqueeze, macdTangle, shortExhaustion, bearSlopeCount, kcMid, kcUpper, kcLower, near, hist0, hist1, hist2);
 
-			// ── Normalizovaný MACD histogram ─────────────────────────────────────
-			double histNorm = atr > 0
-				? Math.Max(-100, Math.Min(100, hist0 / (atr * 0.5) * 100))
-				: 0;
+			TrendPhase bullCandidate = GetRawTrendPhase(
+				true, priorBullPhase, fullSqueeze, macdTangle,
+				bullSlopeCount, hist0, hist1, longExhaustion, longFadeBars);
 
-			// ── Squeeze hodnota ───────────────────────────────────────────────────
-			double squeezeVal = fullSqueeze ? 100 : (partialSqueeze ? 50 : 0);
+			TrendPhase bearCandidate = GetRawTrendPhase(
+				false, priorBearPhase, fullSqueeze, macdTangle,
+				bearSlopeCount, hist0, hist1, shortExhaustion, shortFadeBars);
 
-			// ── Approach skóre BUY ────────────────────────────────────────────────
-			int approachBuyRaw = 0;
-			if (!fullSqueeze)                                            approachBuyRaw++;
-			if (hist0 > 0)                                               approachBuyRaw++;
-			if (RequireThreeBarMomentum ? hist0 > hist1 && hist1 > hist2 : hist0 > hist1)
-				approachBuyRaw++;
-			if (!longExhaustion)                                         approachBuyRaw++;
-			if (bullSlopeCount >= 1)                                     approachBuyRaw++;
-			if (Close[0] > kcUpper - near || Close[0] > kcMid - near)  approachBuyRaw++;
-			if (!macdTangle)                                             approachBuyRaw++;
-			double approachBuy = approachBuyRaw * (100.0 / MAX_SCORE);
+			TrendPhase bullPhase = AdvancePhase(priorBullPhase, bullCandidate);
+			TrendPhase bearPhase = AdvancePhase(priorBearPhase, bearCandidate);
 
-			// ── Approach skóre SELL (záporné) ────────────────────────────────────
-			int approachSellRaw = 0;
-			if (!fullSqueeze)                                            approachSellRaw++;
-			if (hist0 < 0)                                               approachSellRaw++;
-			if (RequireThreeBarMomentum ? hist0 < hist1 && hist1 < hist2 : hist0 < hist1)
-				approachSellRaw++;
-			if (!shortExhaustion)                                        approachSellRaw++;
-			if (bearSlopeCount >= 1)                                     approachSellRaw++;
-			if (Close[0] < kcLower + near || Close[0] < kcMid + near)  approachSellRaw++;
-			if (!macdTangle)                                             approachSellRaw++;
-			double approachSell = -(approachSellRaw * (100.0 / MAX_SCORE));
+			TrendDirection direction = ResolveDirection(bullPhase, bearPhase);
+			TrendPhase phase = direction == TrendDirection.Long ? bullPhase
+				: direction == TrendDirection.Short ? bearPhase
+				: TrendPhase.Flat;
 
-			// ── zápis do plotů ────────────────────────────────────────────────────
-			Values[0][0] = buyStrength;
-			Values[1][0] = -sellStrength;           // záporné = pod nulou
-			Values[2][0] = histNorm;
-			Values[3][0] = squeezeVal;
-			Values[4][0] = approachBuy;
-			Values[5][0] = approachSell;
-			Values[6][0] = 0;
+			double entryScore = GetEntryScore(
+				direction, phase, direction == TrendDirection.Long ? bullSlopeCount : bearSlopeCount,
+				direction == TrendDirection.Long ? approachLongRaw : approachShortRaw,
+				macdTangle, partialSqueeze, fullSqueeze);
 
-			// ── barvy ─────────────────────────────────────────────────────────────
-			PlotBrushes[0][0] = buyStrength  >= 60 ? brushBullStrong : (buyStrength  >= 30 ? brushBullWeak  : brushNeutral);
-			PlotBrushes[1][0] = sellStrength >= 60 ? brushBearStrong : (sellStrength >= 30 ? brushBearWeak  : brushNeutral);
-			PlotBrushes[2][0] = hist0 > 0
-				? (hist0 > hist1 ? brushBullStrong : brushBullWeak)
-				: (hist0 < hist1 ? brushBearStrong : brushBearWeak);
-			PlotBrushes[3][0] = fullSqueeze ? brushSqueeze : (partialSqueeze ? brushExitWarn : brushZero);
-			PlotBrushes[4][0] = approachBuyRaw >= 5 ? brushBullStrong : brushBullWeak;
-			PlotBrushes[5][0] = approachSellRaw >= 5 ? brushBearStrong : brushBearWeak;
-			PlotBrushes[6][0] = brushZero;
+			entryScoreHistory[0] = entryScore;
 
-			// ── textový popis aktuálního stavu (vykreslí se na poslední svíčce) ──
-			if (ShowStatusText && IsFirstTickOfBar && CurrentBar > 0)
-				DrawStatusText(hist0, hist1, buyStrength, sellStrength,
-					squeezeVal, approachBuyRaw, approachSellRaw, bullSlopeCount, bearSlopeCount,
-					longExhaustion, shortExhaustion, macdTangle);
+			double phaseHeight = GetPhaseHeight(phase);
+			double phasePlot = direction == TrendDirection.Short ? -phaseHeight : phaseHeight;
+
+			Values[0][0] = phasePlot;
+			Values[1][0] = entryScore;
+			Values[2][0] = 0;
+
+			PlotBrushes[0][0] = GetPhaseBrush(direction, phase);
+			PlotBrushes[1][0] = entryScore >= 70 ? brushEntryGood : (entryScore >= 40 ? brushEntryMid : brushEntryLow);
+			PlotBrushes[2][0] = brushZero;
+
+			if (ShowTrendStartArrows)
+				DrawTrendStartArrow(priorBullPhase, bullPhase, priorBearPhase, bearPhase, phasePlot, entryScore);
+
+			if (ShowPeakMarkers)
+			{
+				if (priorBullPhase == TrendPhase.Active && (bullPhase == TrendPhase.Mature || bullPhase == TrendPhase.Fading))
+					DrawPeakMarker(true, bullPhase);
+				if (priorBearPhase == TrendPhase.Active && (bearPhase == TrendPhase.Mature || bearPhase == TrendPhase.Fading))
+					DrawPeakMarker(false, bearPhase);
+			}
+
+			if (ShowStatusText)
+				DrawStatusText(direction, phase, entryScore, bullSlopeCount, bearSlopeCount,
+					approachLongRaw, approachShortRaw, fullSqueeze, partialSqueeze, macdTangle,
+					longExhaustion, shortExhaustion);
+
+			priorBullPhase  = bullPhase;
+			priorBearPhase  = bearPhase;
+			activeDirection = direction;
 		}
 
-		// ────────────────────────────────────────────────────────────────────────
-		//  Pomocné metody — přepsány ze V39 (bez závislosti na interním stavu)
-		// ────────────────────────────────────────────────────────────────────────
+		private TrendPhase GetRawTrendPhase(
+			bool isLong,
+			TrendPhase priorPhase,
+			bool fullSqueeze,
+			bool macdTangle,
+			int slopeCount,
+			double hist0,
+			double hist1,
+			bool exhaustion,
+			int fadeBars)
+		{
+			if (fullSqueeze || macdTangle)
+				return TrendPhase.Flat;
+
+			if (isLong)
+			{
+				if (slopeCount == 0 && hist0 <= 0)
+					return TrendPhase.Flat;
+
+				if (fadeBars >= MomentumFadeBars || (hist0 < 0 && priorPhase >= TrendPhase.Active))
+					return TrendPhase.Fading;
+
+				if (slopeCount >= 2 && hist0 > 0 && (hist0 < hist1 || exhaustion))
+					return TrendPhase.Mature;
+
+				if (slopeCount >= 3 && hist0 > 0 && hist0 > hist1 && !exhaustion)
+					return TrendPhase.Active;
+
+				if (slopeCount >= 1 && hist0 > 0 && hist0 > hist1 && !exhaustion)
+					return TrendPhase.Forming;
+
+				return TrendPhase.Flat;
+			}
+
+			if (slopeCount == 0 && hist0 >= 0)
+				return TrendPhase.Flat;
+
+			if (fadeBars >= MomentumFadeBars || (hist0 > 0 && priorPhase >= TrendPhase.Active))
+				return TrendPhase.Fading;
+
+			if (slopeCount >= 2 && hist0 < 0 && (hist0 > hist1 || exhaustion))
+				return TrendPhase.Mature;
+
+			if (slopeCount >= 3 && hist0 < 0 && hist0 < hist1 && !exhaustion)
+				return TrendPhase.Active;
+
+			if (slopeCount >= 1 && hist0 < 0 && hist0 < hist1 && !exhaustion)
+				return TrendPhase.Forming;
+
+			return TrendPhase.Flat;
+		}
+
+		private TrendPhase AdvancePhase(TrendPhase prior, TrendPhase candidate)
+		{
+			if (candidate == TrendPhase.Flat)
+				return TrendPhase.Flat;
+
+			if (prior == TrendPhase.Flat)
+				return candidate;
+
+			int priorRank    = (int)prior;
+			int candidateRank = (int)candidate;
+
+			if (candidateRank >= priorRank)
+				return candidate;
+
+			if (prior == TrendPhase.Active && (candidate == TrendPhase.Mature || candidate == TrendPhase.Fading))
+				return candidate;
+
+			if (prior == TrendPhase.Mature && candidate == TrendPhase.Fading)
+				return TrendPhase.Fading;
+
+			return prior;
+		}
+
+		private TrendDirection ResolveDirection(TrendPhase bullPhase, TrendPhase bearPhase)
+		{
+			int bullRank = (int)bullPhase;
+			int bearRank = (int)bearPhase;
+
+			if (bullRank == 0 && bearRank == 0)
+				return TrendDirection.None;
+
+			if (bullRank > bearRank)
+				return TrendDirection.Long;
+
+			if (bearRank > bullRank)
+				return TrendDirection.Short;
+
+			if (bullRank == bearRank && bullRank > 0)
+			{
+				if (activeDirection == TrendDirection.Short)
+					return TrendDirection.Short;
+				return TrendDirection.Long;
+			}
+
+			return TrendDirection.None;
+		}
+
+		private double GetEntryScore(
+			TrendDirection direction,
+			TrendPhase phase,
+			int slopeCount,
+			int approachRaw,
+			bool macdTangle,
+			bool partialSqueeze,
+			bool fullSqueeze)
+		{
+			if (direction == TrendDirection.None || fullSqueeze)
+				return 0;
+
+			if (phase != TrendPhase.Forming && phase != TrendPhase.Active)
+				return 0;
+
+			double score = 0;
+			if (phase == TrendPhase.Active)
+				score += 50;
+			else if (phase == TrendPhase.Forming)
+				score += 20;
+
+			score += Math.Min(4, slopeCount) * 5;
+			score += approachRaw * (20.0 / MAX_APPROACH);
+
+			if (!macdTangle)
+				score += 8;
+
+			if (!partialSqueeze)
+				score += 4;
+
+			return Math.Min(100, score);
+		}
+
+		private static double GetPhaseHeight(TrendPhase phase)
+		{
+			switch (phase)
+			{
+				case TrendPhase.Forming: return 30;
+				case TrendPhase.Active:  return 85;
+				case TrendPhase.Mature:  return 50;
+				case TrendPhase.Fading:  return 20;
+				default:                 return 0;
+			}
+		}
+
+		private Brush GetPhaseBrush(TrendDirection direction, TrendPhase phase)
+		{
+			if (phase == TrendPhase.Flat || direction == TrendDirection.None)
+				return brushNeutral;
+
+			switch (phase)
+			{
+				case TrendPhase.Forming:
+					return brushForming;
+				case TrendPhase.Active:
+					return direction == TrendDirection.Long ? brushBullStrong : brushBearStrong;
+				case TrendPhase.Mature:
+					return direction == TrendDirection.Long ? brushBullWeak : brushBearWeak;
+				case TrendPhase.Fading:
+					return brushFading;
+				default:
+					return brushNeutral;
+			}
+		}
+
+		private void DrawTrendStartArrow(
+			TrendPhase priorBull, TrendPhase bullPhase,
+			TrendPhase priorBear, TrendPhase bearPhase,
+			double phasePlot, double entryScore)
+		{
+			if (priorBull == TrendPhase.Flat && (bullPhase == TrendPhase.Forming || bullPhase == TrendPhase.Active))
+			{
+				double y = Math.Max(35, Math.Abs(phasePlot) + 5);
+				Draw.ArrowUp(this, "MES500TDB_TUp_" + CurrentBar, false, 0, y, Brushes.LimeGreen);
+			}
+			else if (priorBear == TrendPhase.Flat && (bearPhase == TrendPhase.Forming || bearPhase == TrendPhase.Active))
+			{
+				double y = Math.Min(-35, phasePlot - 5);
+				Draw.ArrowDown(this, "MES500TDB_TDn_" + CurrentBar, false, 0, y, Brushes.OrangeRed);
+			}
+		}
+
+		private void DrawPeakMarker(bool isLong, TrendPhase newPhase)
+		{
+			int lookback = Math.Max(3, Math.Min(10, PeakLookbackBars));
+			int bestBarsAgo = 0;
+			double bestScore = -1;
+
+			for (int i = 1; i <= lookback && CurrentBar >= i; i++)
+			{
+				double score = entryScoreHistory[i];
+				if (score > bestScore)
+				{
+					bestScore = score;
+					bestBarsAgo = i;
+				}
+			}
+
+			if (bestScore < 0)
+				return;
+
+			string tag = "MES500TDB_Peak_" + (CurrentBar - bestBarsAgo);
+			double y = entryScoreHistory[bestBarsAgo];
+			if (y <= 0)
+				y = 70;
+
+			if (isLong)
+			{
+				Draw.ArrowDown(this, tag + "_Arr", false, bestBarsAgo, y + 8, Brushes.Gold);
+				Draw.Text(this, tag + "_Txt", "PEAK", bestBarsAgo, y + 14, Brushes.Gold);
+			}
+			else
+			{
+				double phaseAtPeak = Values[0][bestBarsAgo];
+				double markerY = phaseAtPeak != 0 ? phaseAtPeak - 8 : -78;
+				Draw.ArrowUp(this, tag + "_Arr", false, bestBarsAgo, markerY, Brushes.Gold);
+				Draw.Text(this, tag + "_Txt", "PEAK", bestBarsAgo, markerY - 8, Brushes.Gold);
+			}
+		}
+
+		private void DrawStatusText(
+			TrendDirection direction,
+			TrendPhase phase,
+			double entryScore,
+			int bullSlope,
+			int bearSlope,
+			int appLong,
+			int appShort,
+			bool fullSqueeze,
+			bool partialSqueeze,
+			bool tangle,
+			bool longExh,
+			bool shortExh)
+		{
+			string phaseText = GetPhaseText(direction, phase);
+			string entryText = "Entry Score: " + entryScore.ToString("0") + "%"
+				+ (entryScore >= 70 ? " — vhodné vstoupit" : entryScore >= 40 ? " — slabší setup" : " — nevhodné");
+
+			string sqzText;
+			if (fullSqueeze)
+				sqzText = "Squeeze: FULL — čekej";
+			else if (partialSqueeze)
+				sqzText = "Squeeze: partial";
+			else
+				sqzText = "Squeeze: off";
+
+			string warnText = string.Empty;
+			if (tangle)
+				warnText = "TANGLE — nevstupovat";
+			else if (phase == TrendPhase.Fading)
+				warnText = "Trend slábne — zvaž zavření";
+			else if (phase == TrendPhase.Mature)
+				warnText = "Trend zralý — momentum slábne";
+			else if (longExh && direction == TrendDirection.Long)
+				warnText = "Long EXHAUST";
+			else if (shortExh && direction == TrendDirection.Short)
+				warnText = "Short EXHAUST";
+
+			string slopeText = "KC slope: bull " + bullSlope + " / bear " + bearSlope;
+			string appText = "Approach: BUY " + appLong + "/7 · SELL " + appShort + "/7";
+
+			string fullText = phaseText + "\n" + entryText + "\n" + sqzText;
+			if (warnText.Length > 0)
+				fullText += "\n" + warnText;
+			fullText += "\n" + slopeText + "\n" + appText;
+
+			Brush textBrush = direction == TrendDirection.Long ? brushBullStrong
+				: direction == TrendDirection.Short ? brushBearStrong
+				: brushNeutral;
+
+			Draw.TextFixed(this, "MES500TDB_Status", fullText,
+				TextPosition.BottomLeft, textBrush, labelFont,
+				Brushes.Black, Brushes.Transparent, 0);
+		}
+
+		private static string GetPhaseText(TrendDirection direction, TrendPhase phase)
+		{
+			string dir = direction == TrendDirection.Long ? "NÁKUP"
+				: direction == TrendDirection.Short ? "PRODEJ"
+				: "—";
+
+			switch (phase)
+			{
+				case TrendPhase.Forming: return "FORMING ↑ " + dir + " — trend začíná";
+				case TrendPhase.Active:  return "ACTIVE ↑ " + dir + " — silný trend";
+				case TrendPhase.Mature:  return "MATURE ↑ " + dir + " — trend pokračuje, slábne";
+				case TrendPhase.Fading:  return "FADING ↓ " + dir + " — trend končí";
+				default:                 return "FLAT — bez trendu";
+			}
+		}
+
+		private int CountKcSlopeBars(bool isLong)
+		{
+			int count = 0;
+			for (int i = 0; i < 8 && i + 1 <= CurrentBar; i++)
+			{
+				if (isLong)
+				{
+					if (kcEmaInd[i] > kcEmaInd[i + 1])
+						count++;
+					else
+						break;
+				}
+				else
+				{
+					if (kcEmaInd[i] < kcEmaInd[i + 1])
+						count++;
+					else
+						break;
+				}
+			}
+			return count;
+		}
+
+		private int CountMomentumFadeBars(bool isLong)
+		{
+			int barsToCheck = Math.Max(MomentumFadeBars, 2);
+			int count = 0;
+
+			for (int i = 0; i < barsToCheck && CurrentBar >= i + 1; i++)
+			{
+				double h0 = macdInd.Diff[i];
+				double h1 = macdInd.Diff[i + 1];
+				if (isLong)
+				{
+					if (h0 < h1 || h0 <= 0)
+						count++;
+					else
+						break;
+				}
+				else
+				{
+					if (h0 > h1 || h0 >= 0)
+						count++;
+					else
+						break;
+				}
+			}
+
+			return count;
+		}
+
+		private int CountApproachScore(
+			bool isLong,
+			bool fullSqueeze,
+			bool macdTangle,
+			bool exhaustion,
+			int slopeCount,
+			double kcMid,
+			double kcUpper,
+			double kcLower,
+			double near,
+			double hist0,
+			double hist1,
+			double hist2)
+		{
+			int score = 0;
+			if (!fullSqueeze)
+				score++;
+
+			if (isLong)
+			{
+				if (hist0 > 0) score++;
+				if (RequireThreeBarMomentum ? hist0 > hist1 && hist1 > hist2 : hist0 > hist1) score++;
+				if (!exhaustion) score++;
+				if (slopeCount >= 1) score++;
+				if (Close[0] > kcUpper - near || Close[0] > kcMid - near) score++;
+			}
+			else
+			{
+				if (hist0 < 0) score++;
+				if (RequireThreeBarMomentum ? hist0 < hist1 && hist1 < hist2 : hist0 < hist1) score++;
+				if (!exhaustion) score++;
+				if (slopeCount >= 1) score++;
+				if (Close[0] < kcLower + near || Close[0] < kcMid + near) score++;
+			}
+
+			if (!macdTangle)
+				score++;
+
+			return score;
+		}
 
 		private bool IsLongExhaustion(double h0, double h1, double h2, double h3)
 		{
@@ -297,130 +653,11 @@ namespace NinjaTrader.NinjaScript.Indicators
 			double macdSlope   = macdInd[0]     - macdInd[1];
 			double signalSlope = macdInd.Avg[0] - macdInd.Avg[1];
 			double sepThr      = TangleSeparationTicks * TickSize;
-			double slopeThr    = TangleSlopeTicks       * TickSize;
-			return separation  <= sepThr
-			    && Math.Abs(macdSlope)   <= slopeThr
-			    && Math.Abs(signalSlope) <= slopeThr;
+			double slopeThr    = TangleSlopeTicks * TickSize;
+			return separation <= sepThr
+				&& Math.Abs(macdSlope) <= slopeThr
+				&& Math.Abs(signalSlope) <= slopeThr;
 		}
-
-		// ── textové popisy na grafu ────────────────────────────────────────────
-		private void DrawStatusText(
-			double hist0, double hist1,
-			double buyStr, double sellStr,
-			double sqz, int appBuy, int appSell,
-			int bullSlope, int bearSlope,
-			bool longExh, bool shortExh, bool tangle)
-		{
-			// Trend
-			string trendText;
-			Brush  trendBrush;
-			if (buyStr >= 60 && buyStr > sellStr * 1.3)
-			{
-				trendText  = "↑ Trend NÁKUP  (" + bullSlope + " sv.)";
-				trendBrush = Brushes.LimeGreen;
-			}
-			else if (sellStr >= 60 && sellStr > buyStr * 1.3)
-			{
-				trendText  = "↓ Trend PRODEJ  (" + bearSlope + " sv.)";
-				trendBrush = Brushes.OrangeRed;
-			}
-			else
-			{
-				trendText  = "→ Bez jasného trendu";
-				trendBrush = Brushes.Gray;
-			}
-
-			// Momentum
-			string momText;
-			Brush  momBrush;
-			if (tangle)
-			{
-				momText  = "Momentum: TANGLE (nevstupovat)";
-				momBrush = Brushes.Gold;
-			}
-			else if (hist0 > 0 && hist0 > hist1)
-			{
-				momText  = "Momentum: ↑ roste" + (longExh  ? " · EXHAUST!" : string.Empty);
-				momBrush = longExh ? Brushes.Gold : Brushes.LimeGreen;
-			}
-			else if (hist0 < 0 && hist0 < hist1)
-			{
-				momText  = "Momentum: ↓ klesá" + (shortExh ? " · EXHAUST!" : string.Empty);
-				momBrush = shortExh ? Brushes.Gold : Brushes.OrangeRed;
-			}
-			else if (hist0 > 0)
-			{
-				momText  = "Momentum: ↑ slabne" + (longExh  ? " · EXHAUST!" : string.Empty);
-				momBrush = longExh ? Brushes.Gold : Brushes.CornflowerBlue;
-			}
-			else if (hist0 < 0)
-			{
-				momText  = "Momentum: ↓ slabne" + (shortExh ? " · EXHAUST!" : string.Empty);
-				momBrush = shortExh ? Brushes.Gold : Brushes.CornflowerBlue;
-			}
-			else
-			{
-				momText  = "Momentum: neutrální";
-				momBrush = Brushes.Gray;
-			}
-
-			// Squeeze
-			string sqzText;
-			Brush  sqzBrush;
-			if (sqz >= 100)
-			{
-				sqzText  = "Squeeze: ● FULL — čekej na výstřel";
-				sqzBrush = Brushes.Gold;
-			}
-			else if (sqz >= 50)
-			{
-				sqzText  = "Squeeze: ○ partial";
-				sqzBrush = Brushes.Orange;
-			}
-			else
-			{
-				sqzText  = "Squeeze: off";
-				sqzBrush = Brushes.Gray;
-			}
-
-			// Approach
-			string appText;
-			Brush  appBrush;
-			if (appBuy >= 5)
-			{
-				appText  = "Approach: ↑ NÁKUP silný  (" + appBuy + "/7)";
-				appBrush = Brushes.LimeGreen;
-			}
-			else if (appSell >= 5)
-			{
-				appText  = "Approach: ↓ PRODEJ silný  (" + appSell + "/7)";
-				appBrush = Brushes.OrangeRed;
-			}
-			else if (appBuy >= 3)
-			{
-				appText  = "Approach: ↑ BUY slabý  (" + appBuy + "/7)";
-				appBrush = Brushes.CornflowerBlue;
-			}
-			else if (appSell >= 3)
-			{
-				appText  = "Approach: ↓ SELL slabý  (" + appSell + "/7)";
-				appBrush = Brushes.CornflowerBlue;
-			}
-			else
-			{
-				appText  = "Approach: čekání";
-				appBrush = Brushes.Gray;
-			}
-
-			string fullText = trendText + "\n" + momText + "\n" + sqzText + "\n" + appText;
-			Draw.TextFixed(this, "MES500TDB_Status", fullText,
-				TextPosition.BottomLeft, trendBrush, labelFont,
-				Brushes.Black, Brushes.Transparent, 0);
-		}
-
-		// ────────────────────────────────────────────────────────────────────────
-		//  PROPERTIES
-		// ────────────────────────────────────────────────────────────────────────
 
 		[NinjaScriptProperty]
 		[Range(5, 50)]
@@ -459,12 +696,12 @@ namespace NinjaTrader.NinjaScript.Indicators
 
 		[NinjaScriptProperty]
 		[Range(1, 20)]
-		[Display(Name = "Entry Buffer Ticks", Description = "Stejné jako ve V39.", Order = 1, GroupName = "4. Filtry")]
+		[Display(Name = "Entry Buffer Ticks", Order = 1, GroupName = "4. Filtry")]
 		public int EntryBufferTicks { get; set; }
 
 		[NinjaScriptProperty]
 		[Range(2, 30)]
-		[Display(Name = "Approach Near Ticks", Description = "Stejné jako ve V39.", Order = 2, GroupName = "4. Filtry")]
+		[Display(Name = "Approach Near Ticks", Order = 2, GroupName = "4. Filtry")]
 		public int ApproachNearTicks { get; set; }
 
 		[NinjaScriptProperty]
@@ -482,28 +719,34 @@ namespace NinjaTrader.NinjaScript.Indicators
 		public int TangleSlopeTicks { get; set; } = 1;
 
 		[NinjaScriptProperty]
-		[Display(Name = "Show Status Text", Description = "Text vpravo dole — aktuální trend / momentum / squeeze / approach.", Order = 1, GroupName = "5. Zobrazení")]
-		public bool ShowStatusText { get; set; } = true;
+		[Display(Name = "Show Status Text", Order = 1, GroupName = "5. Zobrazení")]
+		public bool ShowStatusText { get; set; }
 
-		// ── přístupné série pro jiné indikátory ────────────────────────────────
+		[NinjaScriptProperty]
+		[Display(Name = "Show Trend Start Arrows", Description = "Šipka při FLAT → FORMING/ACTIVE.", Order = 2, GroupName = "5. Zobrazení")]
+		public bool ShowTrendStartArrows { get; set; }
+
+		[NinjaScriptProperty]
+		[Display(Name = "Show Peak Markers", Description = "PEAK značka při ACTIVE → MATURE/FADING.", Order = 3, GroupName = "5. Zobrazení")]
+		public bool ShowPeakMarkers { get; set; }
+
+		[NinjaScriptProperty]
+		[Range(1, 5)]
+		[Display(Name = "Momentum Fade Bars", Order = 1, GroupName = "6. Trend fáze")]
+		public int MomentumFadeBars { get; set; }
+
+		[NinjaScriptProperty]
+		[Range(3, 10)]
+		[Display(Name = "Peak Lookback Bars", Order = 2, GroupName = "6. Trend fáze")]
+		public int PeakLookbackBars { get; set; }
+
 		[Browsable(false)]
 		[XmlIgnore]
-		public Series<double> SilaNakup    => Values[0];
+		public Series<double> TrendPhasePlot => Values[0];
+
 		[Browsable(false)]
 		[XmlIgnore]
-		public Series<double> SilaProdej   => Values[1];
-		[Browsable(false)]
-		[XmlIgnore]
-		public Series<double> Momentum     => Values[2];
-		[Browsable(false)]
-		[XmlIgnore]
-		public Series<double> SqueezeValue => Values[3];
-		[Browsable(false)]
-		[XmlIgnore]
-		public Series<double> ApproachBuy  => Values[4];
-		[Browsable(false)]
-		[XmlIgnore]
-		public Series<double> ApproachSell => Values[5];
+		public Series<double> EntryScorePlot => Values[1];
 	}
 }
 
@@ -514,18 +757,18 @@ namespace NinjaTrader.NinjaScript.Indicators
 	public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
 	{
 		private MES500TDashboard[] cacheMES500TDashboard;
-		public MES500TDashboard MES500TDashboard(int bbPeriod, double bbStdDev, int kcPeriod, double kcMultiplier, int macdFast, int macdSlow, int macdSignal, int entryBufferTicks, int approachNearTicks, bool requireThreeBarMomentum, int tangleSeparationTicks, int tangleSlopeTicks, bool showStatusText)
+		public MES500TDashboard MES500TDashboard(int bbPeriod, double bbStdDev, int kcPeriod, double kcMultiplier, int macdFast, int macdSlow, int macdSignal, int entryBufferTicks, int approachNearTicks, bool requireThreeBarMomentum, int tangleSeparationTicks, int tangleSlopeTicks, bool showStatusText, bool showTrendStartArrows, bool showPeakMarkers, int momentumFadeBars, int peakLookbackBars)
 		{
-			return MES500TDashboard(Input, bbPeriod, bbStdDev, kcPeriod, kcMultiplier, macdFast, macdSlow, macdSignal, entryBufferTicks, approachNearTicks, requireThreeBarMomentum, tangleSeparationTicks, tangleSlopeTicks, showStatusText);
+			return MES500TDashboard(Input, bbPeriod, bbStdDev, kcPeriod, kcMultiplier, macdFast, macdSlow, macdSignal, entryBufferTicks, approachNearTicks, requireThreeBarMomentum, tangleSeparationTicks, tangleSlopeTicks, showStatusText, showTrendStartArrows, showPeakMarkers, momentumFadeBars, peakLookbackBars);
 		}
 
-		public MES500TDashboard MES500TDashboard(ISeries<double> input, int bbPeriod, double bbStdDev, int kcPeriod, double kcMultiplier, int macdFast, int macdSlow, int macdSignal, int entryBufferTicks, int approachNearTicks, bool requireThreeBarMomentum, int tangleSeparationTicks, int tangleSlopeTicks, bool showStatusText)
+		public MES500TDashboard MES500TDashboard(ISeries<double> input, int bbPeriod, double bbStdDev, int kcPeriod, double kcMultiplier, int macdFast, int macdSlow, int macdSignal, int entryBufferTicks, int approachNearTicks, bool requireThreeBarMomentum, int tangleSeparationTicks, int tangleSlopeTicks, bool showStatusText, bool showTrendStartArrows, bool showPeakMarkers, int momentumFadeBars, int peakLookbackBars)
 		{
 			if (cacheMES500TDashboard != null)
 				for (int idx = 0; idx < cacheMES500TDashboard.Length; idx++)
-					if (cacheMES500TDashboard[idx] != null && cacheMES500TDashboard[idx].BbPeriod == bbPeriod && cacheMES500TDashboard[idx].BbStdDev == bbStdDev && cacheMES500TDashboard[idx].KcPeriod == kcPeriod && cacheMES500TDashboard[idx].KcMultiplier == kcMultiplier && cacheMES500TDashboard[idx].MacdFast == macdFast && cacheMES500TDashboard[idx].MacdSlow == macdSlow && cacheMES500TDashboard[idx].MacdSignal == macdSignal && cacheMES500TDashboard[idx].EntryBufferTicks == entryBufferTicks && cacheMES500TDashboard[idx].ApproachNearTicks == approachNearTicks && cacheMES500TDashboard[idx].RequireThreeBarMomentum == requireThreeBarMomentum && cacheMES500TDashboard[idx].TangleSeparationTicks == tangleSeparationTicks && cacheMES500TDashboard[idx].TangleSlopeTicks == tangleSlopeTicks && cacheMES500TDashboard[idx].ShowStatusText == showStatusText && cacheMES500TDashboard[idx].EqualsInput(input))
+					if (cacheMES500TDashboard[idx] != null && cacheMES500TDashboard[idx].BbPeriod == bbPeriod && cacheMES500TDashboard[idx].BbStdDev == bbStdDev && cacheMES500TDashboard[idx].KcPeriod == kcPeriod && cacheMES500TDashboard[idx].KcMultiplier == kcMultiplier && cacheMES500TDashboard[idx].MacdFast == macdFast && cacheMES500TDashboard[idx].MacdSlow == macdSlow && cacheMES500TDashboard[idx].MacdSignal == macdSignal && cacheMES500TDashboard[idx].EntryBufferTicks == entryBufferTicks && cacheMES500TDashboard[idx].ApproachNearTicks == approachNearTicks && cacheMES500TDashboard[idx].RequireThreeBarMomentum == requireThreeBarMomentum && cacheMES500TDashboard[idx].TangleSeparationTicks == tangleSeparationTicks && cacheMES500TDashboard[idx].TangleSlopeTicks == tangleSlopeTicks && cacheMES500TDashboard[idx].ShowStatusText == showStatusText && cacheMES500TDashboard[idx].ShowTrendStartArrows == showTrendStartArrows && cacheMES500TDashboard[idx].ShowPeakMarkers == showPeakMarkers && cacheMES500TDashboard[idx].MomentumFadeBars == momentumFadeBars && cacheMES500TDashboard[idx].PeakLookbackBars == peakLookbackBars && cacheMES500TDashboard[idx].EqualsInput(input))
 						return cacheMES500TDashboard[idx];
-			return CacheIndicator<MES500TDashboard>(new MES500TDashboard(){ BbPeriod = bbPeriod, BbStdDev = bbStdDev, KcPeriod = kcPeriod, KcMultiplier = kcMultiplier, MacdFast = macdFast, MacdSlow = macdSlow, MacdSignal = macdSignal, EntryBufferTicks = entryBufferTicks, ApproachNearTicks = approachNearTicks, RequireThreeBarMomentum = requireThreeBarMomentum, TangleSeparationTicks = tangleSeparationTicks, TangleSlopeTicks = tangleSlopeTicks, ShowStatusText = showStatusText }, input, ref cacheMES500TDashboard);
+			return CacheIndicator<MES500TDashboard>(new MES500TDashboard(){ BbPeriod = bbPeriod, BbStdDev = bbStdDev, KcPeriod = kcPeriod, KcMultiplier = kcMultiplier, MacdFast = macdFast, MacdSlow = macdSlow, MacdSignal = macdSignal, EntryBufferTicks = entryBufferTicks, ApproachNearTicks = approachNearTicks, RequireThreeBarMomentum = requireThreeBarMomentum, TangleSeparationTicks = tangleSeparationTicks, TangleSlopeTicks = tangleSlopeTicks, ShowStatusText = showStatusText, ShowTrendStartArrows = showTrendStartArrows, ShowPeakMarkers = showPeakMarkers, MomentumFadeBars = momentumFadeBars, PeakLookbackBars = peakLookbackBars }, input, ref cacheMES500TDashboard);
 		}
 	}
 }
@@ -534,14 +777,14 @@ namespace NinjaTrader.NinjaScript.MarketAnalyzerColumns
 {
 	public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
 	{
-		public Indicators.MES500TDashboard MES500TDashboard(int bbPeriod, double bbStdDev, int kcPeriod, double kcMultiplier, int macdFast, int macdSlow, int macdSignal, int entryBufferTicks, int approachNearTicks, bool requireThreeBarMomentum, int tangleSeparationTicks, int tangleSlopeTicks, bool showStatusText)
+		public Indicators.MES500TDashboard MES500TDashboard(int bbPeriod, double bbStdDev, int kcPeriod, double kcMultiplier, int macdFast, int macdSlow, int macdSignal, int entryBufferTicks, int approachNearTicks, bool requireThreeBarMomentum, int tangleSeparationTicks, int tangleSlopeTicks, bool showStatusText, bool showTrendStartArrows, bool showPeakMarkers, int momentumFadeBars, int peakLookbackBars)
 		{
-			return indicator.MES500TDashboard(Input, bbPeriod, bbStdDev, kcPeriod, kcMultiplier, macdFast, macdSlow, macdSignal, entryBufferTicks, approachNearTicks, requireThreeBarMomentum, tangleSeparationTicks, tangleSlopeTicks, showStatusText);
+			return indicator.MES500TDashboard(Input, bbPeriod, bbStdDev, kcPeriod, kcMultiplier, macdFast, macdSlow, macdSignal, entryBufferTicks, approachNearTicks, requireThreeBarMomentum, tangleSeparationTicks, tangleSlopeTicks, showStatusText, showTrendStartArrows, showPeakMarkers, momentumFadeBars, peakLookbackBars);
 		}
 
-		public Indicators.MES500TDashboard MES500TDashboard(ISeries<double> input , int bbPeriod, double bbStdDev, int kcPeriod, double kcMultiplier, int macdFast, int macdSlow, int macdSignal, int entryBufferTicks, int approachNearTicks, bool requireThreeBarMomentum, int tangleSeparationTicks, int tangleSlopeTicks, bool showStatusText)
+		public Indicators.MES500TDashboard MES500TDashboard(ISeries<double> input , int bbPeriod, double bbStdDev, int kcPeriod, double kcMultiplier, int macdFast, int macdSlow, int macdSignal, int entryBufferTicks, int approachNearTicks, bool requireThreeBarMomentum, int tangleSeparationTicks, int tangleSlopeTicks, bool showStatusText, bool showTrendStartArrows, bool showPeakMarkers, int momentumFadeBars, int peakLookbackBars)
 		{
-			return indicator.MES500TDashboard(input, bbPeriod, bbStdDev, kcPeriod, kcMultiplier, macdFast, macdSlow, macdSignal, entryBufferTicks, approachNearTicks, requireThreeBarMomentum, tangleSeparationTicks, tangleSlopeTicks, showStatusText);
+			return indicator.MES500TDashboard(input, bbPeriod, bbStdDev, kcPeriod, kcMultiplier, macdFast, macdSlow, macdSignal, entryBufferTicks, approachNearTicks, requireThreeBarMomentum, tangleSeparationTicks, tangleSlopeTicks, showStatusText, showTrendStartArrows, showPeakMarkers, momentumFadeBars, peakLookbackBars);
 		}
 	}
 }
@@ -550,14 +793,14 @@ namespace NinjaTrader.NinjaScript.Strategies
 {
 	public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
 	{
-		public Indicators.MES500TDashboard MES500TDashboard(int bbPeriod, double bbStdDev, int kcPeriod, double kcMultiplier, int macdFast, int macdSlow, int macdSignal, int entryBufferTicks, int approachNearTicks, bool requireThreeBarMomentum, int tangleSeparationTicks, int tangleSlopeTicks, bool showStatusText)
+		public Indicators.MES500TDashboard MES500TDashboard(int bbPeriod, double bbStdDev, int kcPeriod, double kcMultiplier, int macdFast, int macdSlow, int macdSignal, int entryBufferTicks, int approachNearTicks, bool requireThreeBarMomentum, int tangleSeparationTicks, int tangleSlopeTicks, bool showStatusText, bool showTrendStartArrows, bool showPeakMarkers, int momentumFadeBars, int peakLookbackBars)
 		{
-			return indicator.MES500TDashboard(Input, bbPeriod, bbStdDev, kcPeriod, kcMultiplier, macdFast, macdSlow, macdSignal, entryBufferTicks, approachNearTicks, requireThreeBarMomentum, tangleSeparationTicks, tangleSlopeTicks, showStatusText);
+			return indicator.MES500TDashboard(Input, bbPeriod, bbStdDev, kcPeriod, kcMultiplier, macdFast, macdSlow, macdSignal, entryBufferTicks, approachNearTicks, requireThreeBarMomentum, tangleSeparationTicks, tangleSlopeTicks, showStatusText, showTrendStartArrows, showPeakMarkers, momentumFadeBars, peakLookbackBars);
 		}
 
-		public Indicators.MES500TDashboard MES500TDashboard(ISeries<double> input , int bbPeriod, double bbStdDev, int kcPeriod, double kcMultiplier, int macdFast, int macdSlow, int macdSignal, int entryBufferTicks, int approachNearTicks, bool requireThreeBarMomentum, int tangleSeparationTicks, int tangleSlopeTicks, bool showStatusText)
+		public Indicators.MES500TDashboard MES500TDashboard(ISeries<double> input , int bbPeriod, double bbStdDev, int kcPeriod, double kcMultiplier, int macdFast, int macdSlow, int macdSignal, int entryBufferTicks, int approachNearTicks, bool requireThreeBarMomentum, int tangleSeparationTicks, int tangleSlopeTicks, bool showStatusText, bool showTrendStartArrows, bool showPeakMarkers, int momentumFadeBars, int peakLookbackBars)
 		{
-			return indicator.MES500TDashboard(input, bbPeriod, bbStdDev, kcPeriod, kcMultiplier, macdFast, macdSlow, macdSignal, entryBufferTicks, approachNearTicks, requireThreeBarMomentum, tangleSeparationTicks, tangleSlopeTicks, showStatusText);
+			return indicator.MES500TDashboard(input, bbPeriod, bbStdDev, kcPeriod, kcMultiplier, macdFast, macdSlow, macdSignal, entryBufferTicks, approachNearTicks, requireThreeBarMomentum, tangleSeparationTicks, tangleSlopeTicks, showStatusText, showTrendStartArrows, showPeakMarkers, momentumFadeBars, peakLookbackBars);
 		}
 	}
 }
