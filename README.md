@@ -10,7 +10,7 @@ Indikátory pro **NinjaTrader 8** a ruční obchodování **MES** na **500 tick*
 |--------|------|
 | `MES500TSqueezeMomentumV39.cs` | **Aktuální plná verze** — jasné vstupy NÁKUP/PRODEJ (trend leg uprostřed trendu + band reversal u KC pásma), exit assessment, trend runner |
 | `MES500TSqueezeMomentumV39Light.cs` | **Aktuální lehká verze** — stejná logika jako V39, méně kreslení (vhodné pro slabší PC) |
-| `MES500TDashboard.cs` | **Sub-panel Dashboard** — Trend Phase (fáze trendu), Entry Score (vhodnost vstupu), šipky startu trendu, PEAK markery u vrcholu |
+| `MES500TDashboard.cs` | **Sub-panel Dashboard v2** — síla trendu, Entry/Exit score, akční panel (Čekej/Vstup/Drž/Zavři), režim trhu, KC zóna |
 | `MES500TSqueezeMomentumV38.cs` | Plná V38 — band reversal u KC pásma, exit assessment (Korekce % / ZAVŘÍT TEĎ), trend runner z V37 |
 | `MES500TSqueezeMomentumV38Light.cs` | Lehká V38 — stejná logika jako V38, méně kreslení |
 | `MES500TSqueezeMomentumV36.cs` | Plná V36 — panel situace, popup, approach ring, ruční režim |
@@ -38,49 +38,44 @@ Starší verze (V31–V37) nejsou v repozitáři — doporučené jsou **V39 / V
 - **V36** — plný UI (panel, popup, ring), ruční trading
 - **V36 Light** — jako V36, ale bez popupu a s omezenou historií značek na grafu
 
-## MES500TDashboard — co zobrazuje
+## MES500TDashboard v2 — co zobrazuje
 
-Dashboard je **samostatný indikátor** v sub-panelu pod grafem. Doplňuje V39 — neříká „vstup hned“, ale **v jaké fázi je trend** a **kdy zvažovat exit**.
+Dashboard je **obchodní pomocník** v sub-panelu pod grafem. Doplňuje V39 — říká **co dělat**, ne jen stav.
 
-### 3 pruhy — vždy jen JEDEN směr trendu
+### 4 pruhy
 
 | Pruh | Popis |
 |------|-------|
-| **TrendPhase** (sloupec) | Vývoj trendu v čase. **Nad nulou = BUY**, **pod nulou = SELL**. Opačný směr = 0 (nic se nezobrazuje) |
-| **EntryScore** (čára ±100) | **+** = vhodnost NÁKUPU, **−** = vhodnost PRODEJE. Nikdy oba najednou |
+| **TrendSila** (sloupce) | Kontinuální síla trendu 0–100, barva = fáze (FORM→ACT→MAT→FADE) |
+| **EntryScore** (modrá čára) | + = vhodnost NÁKUPU, − = vhodnost PRODEJE |
+| **ExitPressure** (oranžová čára) | Tlak na zavření — u long pod nulou, u short nad nulou |
 | **Nula** | referenční linka |
 
-Trend se **zamkne** na jeden směr a projde celým vývojem: FLAT → FORMING (30) → ACTIVE (85) → MATURE (50) → FADING (20) → FLAT. Teprve pak může začít opačný směr.
+### Akční panel (vlevo dole)
 
-### Fáze trendu (Trend Phase)
+Jedna jasná věta co dělat:
 
-| Fáze | Výška | Barva | Význam |
-|------|-------|-------|--------|
-| FLAT | 0 | šedá | bez trendu, squeeze nebo tangle |
-| FORMING | 30 | žlutá | trend začíná |
-| ACTIVE | 85 | zelená/červená | silný trend běží |
-| MATURE | 50 | tlumená | trend pokračuje, momentum slábne |
-| FADING | 20 | oranžová | trend končí — zvaž zavření |
+| Akce | Význam |
+|------|--------|
+| ⏸ ČEKEJ | squeeze nebo bez trendu |
+| ⛔ NEVSTUPOVAT | MACD tangle |
+| 👁 Sleduj | trend začíná |
+| 🟢 VSTUP OK | vhodné vstoupit |
+| 🔵 DRŽ | trend běží |
+| 🟡 DRŽ — slábne | mature fáze |
+| ⚠ ZVAŽ ZAVŘENÍ | fading / exit ≥ 55% |
+| 🔴 ZAVŘÍT | exit ≥ 72% |
 
-### Značky na panelu
+### Režim trhu + KC zóna
 
-| Značka | Kdy |
-|--------|-----|
-| **↑ zelená šipka** | FLAT → FORMING nebo ACTIVE (start nákupního trendu) |
-| **↓ červená šipka** | FLAT → FORMING nebo ACTIVE (start prodejního trendu) |
-| **PEAK** (žlutá) | ACTIVE → MATURE/FADING — retroaktivně u svíčky s nejvyšším Entry Score |
+- **Režim:** TREND ↑/↓ · CHOP · SQUEEZE · FLAT
+- **Zóna:** horní/dolní pásmo (reversal?) · KC mid (trend leg)
 
-### Entry Score (signed)
+### Značky
 
-| Hodnota | Význam |
-|---------|--------|
-| **+70 a více** | vhodné otevřít NÁKUP |
-| **+40 až +70** | slabší BUY setup |
-| **−70 a méně** | vhodné otevřít PRODEJ |
-| **−40 až −70** | slabší SELL setup |
-| **0** | bez aktivního trendu / nevhodné |
-
-Textový souhrn vlevo dole (fáze, entry score, squeeze, varování).
+- **FORM/ACT/MAT/FADE** — popisek při změně fáze
+- **↑/↓ šipka** — start trendu
+- **PEAK** — retroaktivní vrchol trendu
 
 ### Nastavení — musí odpovídat V39
 
