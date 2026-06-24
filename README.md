@@ -10,6 +10,7 @@ Indikátory pro **NinjaTrader 8** a ruční obchodování **MES** na **500 tick*
 |--------|------|
 | `MES500TSqueezeMomentumV39.cs` | **Aktuální plná verze** — jasné vstupy NÁKUP/PRODEJ (trend leg uprostřed trendu + band reversal u KC pásma), exit assessment, trend runner |
 | `MES500TSqueezeMomentumV39Light.cs` | **Aktuální lehká verze** — stejná logika jako V39, méně kreslení (vhodné pro slabší PC) |
+| `MES500TDashboard.cs` | **Sub-panel Dashboard** — samostatné okno pod grafem; 6 pruhů: síla nákupního/prodejního trendu, MACD momentum, squeeze komprese, approach skóre BUY/SELL + textový souhrn |
 | `MES500TSqueezeMomentumV38.cs` | Plná V38 — band reversal u KC pásma, exit assessment (Korekce % / ZAVŘÍT TEĎ), trend runner z V37 |
 | `MES500TSqueezeMomentumV38Light.cs` | Lehká V38 — stejná logika jako V38, méně kreslení |
 | `MES500TSqueezeMomentumV36.cs` | Plná V36 — panel situace, popup, approach ring, ruční režim |
@@ -36,6 +37,35 @@ Starší verze (V31–V37) nejsou v repozitáři — doporučené jsou **V39 / V
 - **V38 Light** — jako V38, méně kreslení
 - **V36** — plný UI (panel, popup, ring), ruční trading
 - **V36 Light** — jako V36, ale bez popupu a s omezenou historií značek na grafu
+
+## MES500TDashboard — co zobrazuje
+
+Dashboard je **samostatný indikátor** přidaný do nového sub-panelu pod grafem. Používá stejné parametry BB/KC/MACD jako V39.
+
+| Pruh | Rozsah | Popis |
+|------|--------|-------|
+| **Síla Nákup** (zelená) | 0–100 | Jak silný je nákupní trend: KC slope + cena nad KC mid + MACD kladný + momentum roste |
+| **Síla Prodej** (červená) | 0–(−100) | Stejné pro prodejní trend, vykresleno pod nulou |
+| **Momentum** (modrá) | −100–+100 | Normalizovaný MACD histogram: roste ↑ zelená, klesá ↓ červená |
+| **Squeeze** (žlutá) | 0 / 50 / 100 | 0 = off, 50 = partial, 100 = full squeeze — čekej na výstřel |
+| **Approach BUY** (čára) | 0–100 | Skóre pravděpodobnosti blízkého vstupu na nákup (0–7 podmínek) |
+| **Approach SELL** (čára) | 0–(−100) | Totéž pro prodej |
+
+Navíc textový popis v levém dolním rohu sub-panelu (lze vypnout `Show Status Text = false`).
+
+### Nastavení Dashboardu — musí odpovídat V39
+
+Zkontroluj, že tyto parametry jsou stejné jako ve V39:
+
+| Parametr | Výchozí |
+|----------|---------|
+| BB Period | 20 |
+| BB Std Dev | 2.0 |
+| KC Period | 20 |
+| KC Multiplier | 1.5 |
+| MACD Fast / Slow / Signal | 6 / 13 / 9 |
+| Entry Buffer Ticks | 1 |
+| Approach Near Ticks | 10 |
 
 ## V39 — klíčové parametry (skupina 22. V39 Manual Entries)
 
