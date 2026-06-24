@@ -5,6 +5,7 @@ using System.ComponentModel.DataAnnotations;
 using System.Windows.Media;
 using System.Xml.Serialization;
 using NinjaTrader.Gui;
+using NinjaTrader.Gui.Tools;
 using NinjaTrader.NinjaScript;
 using NinjaTrader.NinjaScript.DrawingTools;
 using NinjaTrader.NinjaScript.Indicators;
@@ -75,12 +76,11 @@ namespace NinjaTrader.NinjaScript.Indicators
 				MacdSlow       = 13;
 				MacdSignal     = 9;
 
-				EntryBufferTicks      = 1;
-				ApproachNearTicks     = 10;
-				RequireThreeBarMomentum = false;
-				ShowZeroLine          = true;
+			EntryBufferTicks      = 1;
+			ApproachNearTicks     = 10;
+			RequireThreeBarMomentum = false;
 
-				AddPlot(new Stroke(Brushes.LimeGreen,    2), PlotStyle.Bar,    "SílaNákup");
+			AddPlot(new Stroke(Brushes.LimeGreen,    2), PlotStyle.Bar,    "SílaNákup");
 				AddPlot(new Stroke(Brushes.OrangeRed,    2), PlotStyle.Bar,    "SílaProdej");
 				AddPlot(new Stroke(Brushes.DodgerBlue,   1), PlotStyle.Bar,    "Momentum");
 				AddPlot(new Stroke(Brushes.Gold,         2), PlotStyle.Bar,    "Squeeze");
@@ -88,9 +88,9 @@ namespace NinjaTrader.NinjaScript.Indicators
 				AddPlot(new Stroke(Brushes.Tomato,       1), PlotStyle.Line,   "ApproachSell");
 				AddPlot(new Stroke(Brushes.Gray,         1), PlotStyle.Line,   "Nula");
 
-				AddLine(Stroke.DefaultStroke, 0,   "Nula");
-				AddLine(Stroke.DefaultStroke, 50,  "Střed");
-				AddLine(Stroke.DefaultStroke, -50, "StředNeg");
+			AddLine(new Stroke(Brushes.DimGray,  1), 0,   "Nula");
+			AddLine(new Stroke(Brushes.DimGray,  1), 50,  "Střed");
+			AddLine(new Stroke(Brushes.DimGray,  1), -50, "StředNeg");
 			}
 			else if (State == State.Configure)
 			{
@@ -518,41 +518,14 @@ namespace NinjaTrader.NinjaScript.Indicators
 		{
 			return MES500TDashboard(Input, bbPeriod, bbStdDev, kcPeriod, kcMultiplier, macdFast, macdSlow, macdSignal, entryBufferTicks, approachNearTicks, requireThreeBarMomentum, tangleSeparationTicks, tangleSlopeTicks, showStatusText);
 		}
+
 		public MES500TDashboard MES500TDashboard(ISeries<double> input, int bbPeriod, double bbStdDev, int kcPeriod, double kcMultiplier, int macdFast, int macdSlow, int macdSignal, int entryBufferTicks, int approachNearTicks, bool requireThreeBarMomentum, int tangleSeparationTicks, int tangleSlopeTicks, bool showStatusText)
 		{
 			if (cacheMES500TDashboard != null)
 				for (int idx = 0; idx < cacheMES500TDashboard.Length; idx++)
-					if (cacheMES500TDashboard[idx] != null
-					 && cacheMES500TDashboard[idx].BbPeriod             == bbPeriod
-					 && cacheMES500TDashboard[idx].BbStdDev             == bbStdDev
-					 && cacheMES500TDashboard[idx].KcPeriod             == kcPeriod
-					 && cacheMES500TDashboard[idx].KcMultiplier         == kcMultiplier
-					 && cacheMES500TDashboard[idx].MacdFast             == macdFast
-					 && cacheMES500TDashboard[idx].MacdSlow             == macdSlow
-					 && cacheMES500TDashboard[idx].MacdSignal           == macdSignal
-					 && cacheMES500TDashboard[idx].EntryBufferTicks     == entryBufferTicks
-					 && cacheMES500TDashboard[idx].ApproachNearTicks    == approachNearTicks
-					 && cacheMES500TDashboard[idx].RequireThreeBarMomentum == requireThreeBarMomentum
-					 && cacheMES500TDashboard[idx].TangleSeparationTicks == tangleSeparationTicks
-					 && cacheMES500TDashboard[idx].TangleSlopeTicks     == tangleSlopeTicks
-					 && cacheMES500TDashboard[idx].ShowStatusText       == showStatusText
-					 && cacheMES500TDashboard[idx].EqualsInput(input))
+					if (cacheMES500TDashboard[idx] != null && cacheMES500TDashboard[idx].BbPeriod == bbPeriod && cacheMES500TDashboard[idx].BbStdDev == bbStdDev && cacheMES500TDashboard[idx].KcPeriod == kcPeriod && cacheMES500TDashboard[idx].KcMultiplier == kcMultiplier && cacheMES500TDashboard[idx].MacdFast == macdFast && cacheMES500TDashboard[idx].MacdSlow == macdSlow && cacheMES500TDashboard[idx].MacdSignal == macdSignal && cacheMES500TDashboard[idx].EntryBufferTicks == entryBufferTicks && cacheMES500TDashboard[idx].ApproachNearTicks == approachNearTicks && cacheMES500TDashboard[idx].RequireThreeBarMomentum == requireThreeBarMomentum && cacheMES500TDashboard[idx].TangleSeparationTicks == tangleSeparationTicks && cacheMES500TDashboard[idx].TangleSlopeTicks == tangleSlopeTicks && cacheMES500TDashboard[idx].ShowStatusText == showStatusText && cacheMES500TDashboard[idx].EqualsInput(input))
 						return cacheMES500TDashboard[idx];
-			return CacheIndicator<MES500TDashboard>(new MES500TDashboard(){
-				BbPeriod             = bbPeriod,
-				BbStdDev             = bbStdDev,
-				KcPeriod             = kcPeriod,
-				KcMultiplier         = kcMultiplier,
-				MacdFast             = macdFast,
-				MacdSlow             = macdSlow,
-				MacdSignal           = macdSignal,
-				EntryBufferTicks     = entryBufferTicks,
-				ApproachNearTicks    = approachNearTicks,
-				RequireThreeBarMomentum = requireThreeBarMomentum,
-				TangleSeparationTicks = tangleSeparationTicks,
-				TangleSlopeTicks     = tangleSlopeTicks,
-				ShowStatusText       = showStatusText
-			}, ref cacheMES500TDashboard, input);
+			return CacheIndicator<MES500TDashboard>(new MES500TDashboard(){ BbPeriod = bbPeriod, BbStdDev = bbStdDev, KcPeriod = kcPeriod, KcMultiplier = kcMultiplier, MacdFast = macdFast, MacdSlow = macdSlow, MacdSignal = macdSignal, EntryBufferTicks = entryBufferTicks, ApproachNearTicks = approachNearTicks, RequireThreeBarMomentum = requireThreeBarMomentum, TangleSeparationTicks = tangleSeparationTicks, TangleSlopeTicks = tangleSlopeTicks, ShowStatusText = showStatusText }, input, ref cacheMES500TDashboard);
 		}
 	}
 }
@@ -565,6 +538,11 @@ namespace NinjaTrader.NinjaScript.MarketAnalyzerColumns
 		{
 			return indicator.MES500TDashboard(Input, bbPeriod, bbStdDev, kcPeriod, kcMultiplier, macdFast, macdSlow, macdSignal, entryBufferTicks, approachNearTicks, requireThreeBarMomentum, tangleSeparationTicks, tangleSlopeTicks, showStatusText);
 		}
+
+		public Indicators.MES500TDashboard MES500TDashboard(ISeries<double> input , int bbPeriod, double bbStdDev, int kcPeriod, double kcMultiplier, int macdFast, int macdSlow, int macdSignal, int entryBufferTicks, int approachNearTicks, bool requireThreeBarMomentum, int tangleSeparationTicks, int tangleSlopeTicks, bool showStatusText)
+		{
+			return indicator.MES500TDashboard(input, bbPeriod, bbStdDev, kcPeriod, kcMultiplier, macdFast, macdSlow, macdSignal, entryBufferTicks, approachNearTicks, requireThreeBarMomentum, tangleSeparationTicks, tangleSlopeTicks, showStatusText);
+		}
 	}
 }
 
@@ -575,6 +553,11 @@ namespace NinjaTrader.NinjaScript.Strategies
 		public Indicators.MES500TDashboard MES500TDashboard(int bbPeriod, double bbStdDev, int kcPeriod, double kcMultiplier, int macdFast, int macdSlow, int macdSignal, int entryBufferTicks, int approachNearTicks, bool requireThreeBarMomentum, int tangleSeparationTicks, int tangleSlopeTicks, bool showStatusText)
 		{
 			return indicator.MES500TDashboard(Input, bbPeriod, bbStdDev, kcPeriod, kcMultiplier, macdFast, macdSlow, macdSignal, entryBufferTicks, approachNearTicks, requireThreeBarMomentum, tangleSeparationTicks, tangleSlopeTicks, showStatusText);
+		}
+
+		public Indicators.MES500TDashboard MES500TDashboard(ISeries<double> input , int bbPeriod, double bbStdDev, int kcPeriod, double kcMultiplier, int macdFast, int macdSlow, int macdSignal, int entryBufferTicks, int approachNearTicks, bool requireThreeBarMomentum, int tangleSeparationTicks, int tangleSlopeTicks, bool showStatusText)
+		{
+			return indicator.MES500TDashboard(input, bbPeriod, bbStdDev, kcPeriod, kcMultiplier, macdFast, macdSlow, macdSignal, entryBufferTicks, approachNearTicks, requireThreeBarMomentum, tangleSeparationTicks, tangleSlopeTicks, showStatusText);
 		}
 	}
 }
