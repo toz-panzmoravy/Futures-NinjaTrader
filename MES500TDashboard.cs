@@ -14,8 +14,8 @@ using NinjaTrader.NinjaScript.Indicators;
 namespace NinjaTrader.NinjaScript.Indicators
 {
 	/// <summary>
-	/// MES500T Dashboard — sub-panel: Trend Phase, Entry Score, Peak markery.
-	/// Odvozeno ze stejných KC/BB/MACD parametrů jako V39.
+	/// MES500T Dashboard — jeden aktivní trend najednou (BUY nebo SELL, nikdy oba).
+	/// TrendPhase sloupec + signed EntryScore linka + PEAK markery.
 	/// </summary>
 	public class MES500TDashboard : Indicator
 	{
@@ -58,21 +58,21 @@ namespace NinjaTrader.NinjaScript.Indicators
 		private SimpleFont labelFont;
 		private SimpleFont markerFont;
 
-		private TrendPhase priorBullPhase;
-		private TrendPhase priorBearPhase;
-		private TrendDirection activeDirection;
+		private TrendPhase priorTrendPhase;
+		private TrendDirection priorTrendDirection;
+		private TrendDirection lockedDirection;
 
 		private Series<double> entryScoreHistory;
 
-		// Plot 0: TrendPhase (signed bar)
-		// Plot 1: EntryScore (0–100 line)
+		// Plot 0: TrendPhase — signed bar (nad 0 = BUY trend, pod 0 = SELL trend, jen jeden směr)
+		// Plot 1: EntryScore — signed line (+ = BUY entry, − = SELL entry)
 		// Plot 2: Zero line
 
 		protected override void OnStateChange()
 		{
 			if (State == State.SetDefaults)
 			{
-				Description = "MES500T Dashboard — Trend Phase, Entry Score, Peak markery (sub-panel).";
+				Description = "MES500T Dashboard — jeden trend (BUY/SELL), fáze vývoje, signed Entry Score, PEAK.";
 				Name        = "MES500TDashboard";
 				Calculate   = Calculate.OnBarClose;
 				IsOverlay   = false;
@@ -102,9 +102,11 @@ namespace NinjaTrader.NinjaScript.Indicators
 				AddPlot(new Stroke(Brushes.DodgerBlue, 2), PlotStyle.Line, "EntryScore");
 				AddPlot(new Stroke(Brushes.Gray,       1), PlotStyle.Line, "Nula");
 
-				AddLine(new Stroke(Brushes.DimGray, 1), 0,  "Nula");
-				AddLine(new Stroke(Brushes.DimGray, 1), 70, "EntrySilny");
-				AddLine(new Stroke(Brushes.DimGray, 1), 40, "EntrySlaby");
+				AddLine(new Stroke(Brushes.DimGray, 1), 0,   "Nula");
+				AddLine(new Stroke(Brushes.DimGray, 1), 70,  "EntryBuySilny");
+				AddLine(new Stroke(Brushes.DimGray, 1), 40,  "EntryBuySlaby");
+				AddLine(new Stroke(Brushes.DimGray, 1), -70, "EntrySellSilny");
+				AddLine(new Stroke(Brushes.DimGray, 1), -40, "EntrySellSlaby");
 			}
 			else if (State == State.Configure)
 			{
@@ -142,10 +144,10 @@ namespace NinjaTrader.NinjaScript.Indicators
 			}
 			else if (State == State.DataLoaded)
 			{
-				entryScoreHistory = new Series<double>(this);
-				priorBullPhase    = TrendPhase.Flat;
-				priorBearPhase    = TrendPhase.Flat;
-				activeDirection   = TrendDirection.None;
+				entryScoreHistory   = new Series<double>(this);
+				priorTrendPhase     = TrendPhase.Flat;
+				priorTrendDirection = TrendDirection.None;
+				lockedDirection     = TrendDirection.None;
 			}
 		}
 
@@ -184,59 +186,69 @@ namespace NinjaTrader.NinjaScript.Indicators
 			int approachLongRaw  = CountApproachScore(true, fullSqueeze, macdTangle, longExhaustion, bullSlopeCount, kcMid, kcUpper, kcLower, near, hist0, hist1, hist2);
 			int approachShortRaw = CountApproachScore(false, fullSqueeze, macdTangle, shortExhaustion, bearSlopeCount, kcMid, kcUpper, kcLower, near, hist0, hist1, hist2);
 
-			TrendPhase bullCandidate = GetRawTrendPhase(
-				true, priorBullPhase, fullSqueeze, macdTangle,
-				bullSlopeCount, hist0, hist1, longExhaustion, longFadeBars);
+			TrendPhase bullRaw = GetRawTrendPhase(
+				true, priorTrendDirection == TrendDirection.Long ? priorTrendPhase : TrendPhase.Flat,
+				fullSqueeze, macdTangle, bullSlopeCount, hist0, hist1, longExhaustion, longFadeBars);
 
-			TrendPhase bearCandidate = GetRawTrendPhase(
-				false, priorBearPhase, fullSqueeze, macdTangle,
-				bearSlopeCount, hist0, hist1, shortExhaustion, shortFadeBars);
+			TrendPhase bearRaw = GetRawTrendPhase(
+				false, priorTrendDirection == TrendDirection.Short ? priorTrendPhase : TrendPhase.Flat,
+				fullSqueeze, macdTangle, bearSlopeCount, hist0, hist1, shortExhaustion, shortFadeBars);
 
-			TrendPhase bullPhase = AdvancePhase(priorBullPhase, bullCandidate);
-			TrendPhase bearPhase = AdvancePhase(priorBearPhase, bearCandidate);
+			TrendDirection direction = SelectLockedDirection(
+				bullRaw, bearRaw, hist0, bullSlopeCount, bearSlopeCount);
 
-			TrendDirection direction = ResolveDirection(bullPhase, bearPhase);
-			TrendPhase phase = direction == TrendDirection.Long ? bullPhase
-				: direction == TrendDirection.Short ? bearPhase
+			TrendPhase rawPhase = direction == TrendDirection.Long ? bullRaw
+				: direction == TrendDirection.Short ? bearRaw
 				: TrendPhase.Flat;
 
-			double entryScore = GetEntryScore(
-				direction, phase, direction == TrendDirection.Long ? bullSlopeCount : bearSlopeCount,
-				direction == TrendDirection.Long ? approachLongRaw : approachShortRaw,
+			TrendPhase priorPhase = direction == priorTrendDirection ? priorTrendPhase : TrendPhase.Flat;
+			TrendPhase phase = AdvancePhase(priorPhase, rawPhase);
+
+			int activeSlope = direction == TrendDirection.Long ? bullSlopeCount : bearSlopeCount;
+			int activeApproach = direction == TrendDirection.Long ? approachLongRaw : approachShortRaw;
+
+			double entryMagnitude = GetEntryScore(
+				direction, phase, activeSlope, activeApproach,
 				macdTangle, partialSqueeze, fullSqueeze);
 
-			entryScoreHistory[0] = entryScore;
+			double entrySigned = direction == TrendDirection.Long ? entryMagnitude
+				: direction == TrendDirection.Short ? -entryMagnitude
+				: 0;
+
+			entryScoreHistory[0] = entrySigned;
 
 			double phaseHeight = GetPhaseHeight(phase);
-			double phasePlot = direction == TrendDirection.Short ? -phaseHeight : phaseHeight;
+			double phasePlot = direction == TrendDirection.Short ? -phaseHeight
+				: direction == TrendDirection.Long ? phaseHeight
+				: 0;
 
 			Values[0][0] = phasePlot;
-			Values[1][0] = entryScore;
+			Values[1][0] = entrySigned;
 			Values[2][0] = 0;
 
 			PlotBrushes[0][0] = GetPhaseBrush(direction, phase);
-			PlotBrushes[1][0] = entryScore >= 70 ? brushEntryGood : (entryScore >= 40 ? brushEntryMid : brushEntryLow);
+			PlotBrushes[1][0] = GetEntryBrush(entrySigned);
 			PlotBrushes[2][0] = brushZero;
 
 			if (ShowTrendStartArrows)
-				DrawTrendStartArrow(priorBullPhase, bullPhase, priorBearPhase, bearPhase, phasePlot, entryScore);
+				DrawTrendStartArrow(priorTrendDirection, priorTrendPhase, direction, phase, phasePlot);
 
-			if (ShowPeakMarkers)
+			if (ShowPeakMarkers && direction != TrendDirection.None
+				&& priorTrendDirection == direction
+				&& priorTrendPhase == TrendPhase.Active
+				&& (phase == TrendPhase.Mature || phase == TrendPhase.Fading))
 			{
-				if (priorBullPhase == TrendPhase.Active && (bullPhase == TrendPhase.Mature || bullPhase == TrendPhase.Fading))
-					DrawPeakMarker(true, bullPhase);
-				if (priorBearPhase == TrendPhase.Active && (bearPhase == TrendPhase.Mature || bearPhase == TrendPhase.Fading))
-					DrawPeakMarker(false, bearPhase);
+				DrawPeakMarker(direction == TrendDirection.Long, phase);
 			}
 
 			if (ShowStatusText)
-				DrawStatusText(direction, phase, entryScore, bullSlopeCount, bearSlopeCount,
+				DrawStatusText(direction, phase, entrySigned, bullSlopeCount, bearSlopeCount,
 					approachLongRaw, approachShortRaw, fullSqueeze, partialSqueeze, macdTangle,
 					longExhaustion, shortExhaustion);
 
-			priorBullPhase  = bullPhase;
-			priorBearPhase  = bearPhase;
-			activeDirection = direction;
+			priorTrendPhase     = phase;
+			priorTrendDirection = direction;
+			lockedDirection     = direction;
 		}
 
 		private TrendPhase GetRawTrendPhase(
@@ -314,28 +326,60 @@ namespace NinjaTrader.NinjaScript.Indicators
 			return prior;
 		}
 
-		private TrendDirection ResolveDirection(TrendPhase bullPhase, TrendPhase bearPhase)
+		private TrendDirection SelectLockedDirection(
+			TrendPhase bullRaw,
+			TrendPhase bearRaw,
+			double hist0,
+			int bullSlope,
+			int bearSlope)
 		{
-			int bullRank = (int)bullPhase;
-			int bearRank = (int)bearPhase;
+			int bullRank = (int)bullRaw;
+			int bearRank = (int)bearRaw;
 
 			if (bullRank == 0 && bearRank == 0)
 				return TrendDirection.None;
 
-			if (bullRank > bearRank)
-				return TrendDirection.Long;
-
-			if (bearRank > bullRank)
-				return TrendDirection.Short;
-
-			if (bullRank == bearRank && bullRank > 0)
+			if (lockedDirection == TrendDirection.Long && bullRank > 0)
 			{
-				if (activeDirection == TrendDirection.Short)
+				if (bearRank >= (int)TrendPhase.Active && bullRank <= (int)TrendPhase.Mature)
+					return TrendDirection.Short;
+				if (bullRank == 0 && bearRank >= (int)TrendPhase.Forming)
 					return TrendDirection.Short;
 				return TrendDirection.Long;
 			}
 
+			if (lockedDirection == TrendDirection.Short && bearRank > 0)
+			{
+				if (bullRank >= (int)TrendPhase.Active && bearRank <= (int)TrendPhase.Mature)
+					return TrendDirection.Long;
+				if (bearRank == 0 && bullRank >= (int)TrendPhase.Forming)
+					return TrendDirection.Long;
+				return TrendDirection.Short;
+			}
+
+			if (bullRank != bearRank)
+				return bullRank > bearRank ? TrendDirection.Long : TrendDirection.Short;
+
+			if (hist0 > 0)
+				return TrendDirection.Long;
+			if (hist0 < 0)
+				return TrendDirection.Short;
+			if (bullSlope > bearSlope)
+				return TrendDirection.Long;
+			if (bearSlope > bullSlope)
+				return TrendDirection.Short;
+
 			return TrendDirection.None;
+		}
+
+		private Brush GetEntryBrush(double entrySigned)
+		{
+			double abs = Math.Abs(entrySigned);
+			if (abs >= 70)
+				return entrySigned > 0 ? brushEntryGood : brushBearStrong;
+			if (abs >= 40)
+				return brushEntryMid;
+			return brushEntryLow;
 		}
 
 		private double GetEntryScore(
@@ -404,16 +448,22 @@ namespace NinjaTrader.NinjaScript.Indicators
 		}
 
 		private void DrawTrendStartArrow(
-			TrendPhase priorBull, TrendPhase bullPhase,
-			TrendPhase priorBear, TrendPhase bearPhase,
-			double phasePlot, double entryScore)
+			TrendDirection priorDirection,
+			TrendPhase priorPhase,
+			TrendDirection direction,
+			TrendPhase phase,
+			double phasePlot)
 		{
-			if (priorBull == TrendPhase.Flat && (bullPhase == TrendPhase.Forming || bullPhase == TrendPhase.Active))
+			bool wasFlat = priorDirection == TrendDirection.None || priorPhase == TrendPhase.Flat;
+			if (!wasFlat || (phase != TrendPhase.Forming && phase != TrendPhase.Active))
+				return;
+
+			if (direction == TrendDirection.Long)
 			{
 				double y = Math.Max(35, Math.Abs(phasePlot) + 5);
 				Draw.ArrowUp(this, "MES500TDB_TUp_" + CurrentBar, false, 0, y, Brushes.LimeGreen);
 			}
-			else if (priorBear == TrendPhase.Flat && (bearPhase == TrendPhase.Forming || bearPhase == TrendPhase.Active))
+			else if (direction == TrendDirection.Short)
 			{
 				double y = Math.Min(-35, phasePlot - 5);
 				Draw.ArrowDown(this, "MES500TDB_TDn_" + CurrentBar, false, 0, y, Brushes.OrangeRed);
@@ -424,37 +474,41 @@ namespace NinjaTrader.NinjaScript.Indicators
 		{
 			int lookback = Math.Max(3, Math.Min(10, PeakLookbackBars));
 			int bestBarsAgo = 0;
-			double bestScore = -1;
+			double bestAbs = -1;
 
 			for (int i = 1; i <= lookback && CurrentBar >= i; i++)
 			{
 				double score = entryScoreHistory[i];
-				if (score > bestScore)
+				bool sameSide = isLong ? score > 0 : score < 0;
+				if (!sameSide)
+					continue;
+
+				double abs = Math.Abs(score);
+				if (abs > bestAbs)
 				{
-					bestScore = score;
+					bestAbs = abs;
 					bestBarsAgo = i;
 				}
 			}
 
-			if (bestScore < 0)
+			if (bestAbs < 0)
 				return;
 
 			string tag = "MES500TDB_Peak_" + (CurrentBar - bestBarsAgo);
-			double y = entryScoreHistory[bestBarsAgo];
-			if (y <= 0)
-				y = 70;
+			double entryAtPeak = entryScoreHistory[bestBarsAgo];
+			double phaseAtPeak = Values[0][bestBarsAgo];
 
 			if (isLong)
 			{
-				Draw.ArrowDown(this, tag + "_Arr", false, bestBarsAgo, y + 8, Brushes.Gold);
-				Draw.Text(this, tag + "_Txt", "PEAK", bestBarsAgo, y + 14, Brushes.Gold);
+				double y = Math.Max(entryAtPeak, Math.Abs(phaseAtPeak)) + 8;
+				Draw.ArrowDown(this, tag + "_Arr", false, bestBarsAgo, y, Brushes.Gold);
+				Draw.Text(this, tag + "_Txt", "PEAK", bestBarsAgo, y + 6, Brushes.Gold);
 			}
 			else
 			{
-				double phaseAtPeak = Values[0][bestBarsAgo];
-				double markerY = phaseAtPeak != 0 ? phaseAtPeak - 8 : -78;
-				Draw.ArrowUp(this, tag + "_Arr", false, bestBarsAgo, markerY, Brushes.Gold);
-				Draw.Text(this, tag + "_Txt", "PEAK", bestBarsAgo, markerY - 8, Brushes.Gold);
+				double y = Math.Min(entryAtPeak, phaseAtPeak) - 8;
+				Draw.ArrowUp(this, tag + "_Arr", false, bestBarsAgo, y, Brushes.Gold);
+				Draw.Text(this, tag + "_Txt", "PEAK", bestBarsAgo, y - 6, Brushes.Gold);
 			}
 		}
 
@@ -473,8 +527,15 @@ namespace NinjaTrader.NinjaScript.Indicators
 			bool shortExh)
 		{
 			string phaseText = GetPhaseText(direction, phase);
-			string entryText = "Entry Score: " + entryScore.ToString("0") + "%"
-				+ (entryScore >= 70 ? " — vhodné vstoupit" : entryScore >= 40 ? " — slabší setup" : " — nevhodné");
+			double entryAbs = Math.Abs(entryScore);
+			string entryText = direction == TrendDirection.Long
+				? "Entry BUY: +" + entryAbs.ToString("0") + "%"
+				: direction == TrendDirection.Short
+					? "Entry SELL: -" + entryAbs.ToString("0") + "%"
+					: "Entry Score: 0";
+			entryText += entryAbs >= 70 ? " — vhodné vstoupit"
+				: entryAbs >= 40 ? " — slabší setup"
+				: direction != TrendDirection.None ? " — nevhodné" : string.Empty;
 
 			string sqzText;
 			if (fullSqueeze)
