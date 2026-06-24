@@ -15,7 +15,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 {
 	/// <summary>
 	/// MES500T Dashboard — jeden aktivní trend najednou (BUY nebo SELL, nikdy oba).
-	/// TrendPhase sloupec + signed EntryScore linka + PEAK markery.
+	/// TrendPhase sloupec = kontinuální síla 0–100 na každé svíčce (barva = fáze vývoje).
 	/// </summary>
 	public class MES500TDashboard : Indicator
 	{
@@ -61,8 +61,10 @@ namespace NinjaTrader.NinjaScript.Indicators
 		private TrendPhase priorTrendPhase;
 		private TrendDirection priorTrendDirection;
 		private TrendDirection lockedDirection;
+		private double priorDisplayStrength;
 
 		private Series<double> entryScoreHistory;
+		private Series<double> strengthHistory;
 
 		// Plot 0: TrendPhase — signed bar (nad 0 = BUY trend, pod 0 = SELL trend, jen jeden směr)
 		// Plot 1: EntryScore — signed line (+ = BUY entry, − = SELL entry)
@@ -72,7 +74,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 		{
 			if (State == State.SetDefaults)
 			{
-				Description = "MES500T Dashboard — jeden trend (BUY/SELL), fáze vývoje, signed Entry Score, PEAK.";
+				Description = "MES500T Dashboard — kontinuální síla trendu na každé svíčce, barva = fáze, signed Entry Score.";
 				Name        = "MES500TDashboard";
 				Calculate   = Calculate.OnBarClose;
 				IsOverlay   = false;
@@ -144,10 +146,12 @@ namespace NinjaTrader.NinjaScript.Indicators
 			}
 			else if (State == State.DataLoaded)
 			{
-				entryScoreHistory   = new Series<double>(this);
-				priorTrendPhase     = TrendPhase.Flat;
-				priorTrendDirection = TrendDirection.None;
-				lockedDirection     = TrendDirection.None;
+				entryScoreHistory     = new Series<double>(this);
+				strengthHistory       = new Series<double>(this);
+				priorTrendPhase       = TrendPhase.Flat;
+				priorTrendDirection   = TrendDirection.None;
+				lockedDirection       = TrendDirection.None;
+				priorDisplayStrength  = 0;
 			}
 		}
 
@@ -186,47 +190,51 @@ namespace NinjaTrader.NinjaScript.Indicators
 			int approachLongRaw  = CountApproachScore(true, fullSqueeze, macdTangle, longExhaustion, bullSlopeCount, kcMid, kcUpper, kcLower, near, hist0, hist1, hist2);
 			int approachShortRaw = CountApproachScore(false, fullSqueeze, macdTangle, shortExhaustion, bearSlopeCount, kcMid, kcUpper, kcLower, near, hist0, hist1, hist2);
 
-			TrendPhase bullRaw = GetRawTrendPhase(
-				true, priorTrendDirection == TrendDirection.Long ? priorTrendPhase : TrendPhase.Flat,
-				fullSqueeze, macdTangle, bullSlopeCount, hist0, hist1, longExhaustion, longFadeBars);
+			double bullStrength = ComputeDirectionalStrength(
+				true, bullSlopeCount, approachLongRaw, fullSqueeze, partialSqueeze,
+				macdTangle, longExhaustion, hist0, hist1, kcMid);
 
-			TrendPhase bearRaw = GetRawTrendPhase(
-				false, priorTrendDirection == TrendDirection.Short ? priorTrendPhase : TrendPhase.Flat,
-				fullSqueeze, macdTangle, bearSlopeCount, hist0, hist1, shortExhaustion, shortFadeBars);
+			double bearStrength = ComputeDirectionalStrength(
+				false, bearSlopeCount, approachShortRaw, fullSqueeze, partialSqueeze,
+				macdTangle, shortExhaustion, hist0, hist1, kcMid);
 
-			TrendDirection direction = SelectLockedDirection(
-				bullRaw, bearRaw, hist0, bullSlopeCount, bearSlopeCount);
+			TrendDirection direction = SelectLockedDirection(bullStrength, bearStrength, hist0);
 
-			TrendPhase rawPhase = direction == TrendDirection.Long ? bullRaw
-				: direction == TrendDirection.Short ? bearRaw
-				: TrendPhase.Flat;
+			double rawStrength = direction == TrendDirection.Long ? bullStrength
+				: direction == TrendDirection.Short ? bearStrength
+				: 0;
 
-			TrendPhase priorPhase = direction == priorTrendDirection ? priorTrendPhase : TrendPhase.Flat;
-			TrendPhase phase = AdvancePhase(priorPhase, rawPhase);
+			double displayStrength = SmoothDisplayStrength(direction, rawStrength);
+
+			TrendPhase phase = DeriveTrendPhase(
+				direction, displayStrength, priorTrendPhase, priorTrendDirection,
+				direction == TrendDirection.Long ? longExhaustion : shortExhaustion,
+				direction == TrendDirection.Long ? longFadeBars : shortFadeBars,
+				hist0, hist1);
 
 			int activeSlope = direction == TrendDirection.Long ? bullSlopeCount : bearSlopeCount;
 			int activeApproach = direction == TrendDirection.Long ? approachLongRaw : approachShortRaw;
 
 			double entryMagnitude = GetEntryScore(
-				direction, phase, activeSlope, activeApproach,
+				direction, phase, displayStrength, activeSlope, activeApproach,
 				macdTangle, partialSqueeze, fullSqueeze);
 
 			double entrySigned = direction == TrendDirection.Long ? entryMagnitude
 				: direction == TrendDirection.Short ? -entryMagnitude
 				: 0;
 
-			entryScoreHistory[0] = entrySigned;
-
-			double phaseHeight = GetPhaseHeight(phase);
-			double phasePlot = direction == TrendDirection.Short ? -phaseHeight
-				: direction == TrendDirection.Long ? phaseHeight
+			double phasePlot = direction == TrendDirection.Short ? -displayStrength
+				: direction == TrendDirection.Long ? displayStrength
 				: 0;
+
+			entryScoreHistory[0] = entrySigned;
+			strengthHistory[0]   = displayStrength;
 
 			Values[0][0] = phasePlot;
 			Values[1][0] = entrySigned;
 			Values[2][0] = 0;
 
-			PlotBrushes[0][0] = GetPhaseBrush(direction, phase);
+			PlotBrushes[0][0] = GetPhaseBrush(direction, phase, displayStrength);
 			PlotBrushes[1][0] = GetEntryBrush(entrySigned);
 			PlotBrushes[2][0] = brushZero;
 
@@ -242,134 +250,154 @@ namespace NinjaTrader.NinjaScript.Indicators
 			}
 
 			if (ShowStatusText)
-				DrawStatusText(direction, phase, entrySigned, bullSlopeCount, bearSlopeCount,
+				DrawStatusText(direction, phase, entrySigned, displayStrength, bullSlopeCount, bearSlopeCount,
 					approachLongRaw, approachShortRaw, fullSqueeze, partialSqueeze, macdTangle,
 					longExhaustion, shortExhaustion);
 
-			priorTrendPhase     = phase;
-			priorTrendDirection = direction;
-			lockedDirection     = direction;
+			priorTrendPhase       = phase;
+			priorTrendDirection   = direction;
+			priorDisplayStrength  = displayStrength;
+			if (direction != TrendDirection.None)
+				lockedDirection = direction;
+			else if (displayStrength < 8)
+				lockedDirection = TrendDirection.None;
 		}
 
-		private TrendPhase GetRawTrendPhase(
+		private double ComputeDirectionalStrength(
 			bool isLong,
-			TrendPhase priorPhase,
-			bool fullSqueeze,
-			bool macdTangle,
 			int slopeCount,
+			int approachRaw,
+			bool fullSqueeze,
+			bool partialSqueeze,
+			bool macdTangle,
+			bool exhaustion,
 			double hist0,
 			double hist1,
-			bool exhaustion,
-			int fadeBars)
+			double kcMid)
 		{
-			if (fullSqueeze || macdTangle)
-				return TrendPhase.Flat;
+			if (fullSqueeze)
+				return 0;
+
+			double strength = Math.Min(8, slopeCount) * 5.0;
 
 			if (isLong)
 			{
-				if (slopeCount == 0 && hist0 <= 0)
-					return TrendPhase.Flat;
-
-				if (fadeBars >= MomentumFadeBars || (hist0 < 0 && priorPhase >= TrendPhase.Active))
-					return TrendPhase.Fading;
-
-				if (slopeCount >= 2 && hist0 > 0 && (hist0 < hist1 || exhaustion))
-					return TrendPhase.Mature;
-
-				if (slopeCount >= 3 && hist0 > 0 && hist0 > hist1 && !exhaustion)
-					return TrendPhase.Active;
-
-				if (slopeCount >= 1 && hist0 > 0 && hist0 > hist1 && !exhaustion)
-					return TrendPhase.Forming;
-
-				return TrendPhase.Flat;
+				if (hist0 > 0) strength += 12;
+				if (hist0 > hist1) strength += 10;
+				if (Close[0] > kcMid) strength += 12;
+			}
+			else
+			{
+				if (hist0 < 0) strength += 12;
+				if (hist0 < hist1) strength += 10;
+				if (Close[0] < kcMid) strength += 12;
 			}
 
-			if (slopeCount == 0 && hist0 >= 0)
-				return TrendPhase.Flat;
+			if (!exhaustion)
+				strength += 8;
 
-			if (fadeBars >= MomentumFadeBars || (hist0 > 0 && priorPhase >= TrendPhase.Active))
-				return TrendPhase.Fading;
+			strength += approachRaw * (15.0 / MAX_APPROACH);
 
-			if (slopeCount >= 2 && hist0 < 0 && (hist0 > hist1 || exhaustion))
-				return TrendPhase.Mature;
+			if (macdTangle)
+				strength *= 0.35;
+			else if (partialSqueeze)
+				strength *= 0.75;
 
-			if (slopeCount >= 3 && hist0 < 0 && hist0 < hist1 && !exhaustion)
-				return TrendPhase.Active;
+			if (exhaustion)
+				strength *= 0.65;
 
-			if (slopeCount >= 1 && hist0 < 0 && hist0 < hist1 && !exhaustion)
-				return TrendPhase.Forming;
-
-			return TrendPhase.Flat;
+			return Math.Min(100, Math.Max(0, strength));
 		}
 
-		private TrendPhase AdvancePhase(TrendPhase prior, TrendPhase candidate)
+		private TrendDirection SelectLockedDirection(double bullStrength, double bearStrength, double hist0)
 		{
-			if (candidate == TrendPhase.Flat)
-				return TrendPhase.Flat;
+			if (lockedDirection == TrendDirection.Long)
+			{
+				if (bearStrength > bullStrength + 18 && bearStrength >= 30)
+					return TrendDirection.Short;
+				if (bullStrength < 8 && bearStrength >= 22)
+					return TrendDirection.Short;
+				if (bullStrength >= 8 || priorDisplayStrength >= 12)
+					return TrendDirection.Long;
+			}
 
-			if (prior == TrendPhase.Flat)
-				return candidate;
+			if (lockedDirection == TrendDirection.Short)
+			{
+				if (bullStrength > bearStrength + 18 && bullStrength >= 30)
+					return TrendDirection.Long;
+				if (bearStrength < 8 && bullStrength >= 22)
+					return TrendDirection.Long;
+				if (bearStrength >= 8 || priorDisplayStrength >= 12)
+					return TrendDirection.Short;
+			}
 
-			int priorRank    = (int)prior;
-			int candidateRank = (int)candidate;
-
-			if (candidateRank >= priorRank)
-				return candidate;
-
-			if (prior == TrendPhase.Active && (candidate == TrendPhase.Mature || candidate == TrendPhase.Fading))
-				return candidate;
-
-			if (prior == TrendPhase.Mature && candidate == TrendPhase.Fading)
-				return TrendPhase.Fading;
-
-			return prior;
-		}
-
-		private TrendDirection SelectLockedDirection(
-			TrendPhase bullRaw,
-			TrendPhase bearRaw,
-			double hist0,
-			int bullSlope,
-			int bearSlope)
-		{
-			int bullRank = (int)bullRaw;
-			int bearRank = (int)bearRaw;
-
-			if (bullRank == 0 && bearRank == 0)
+			if (bullStrength < 10 && bearStrength < 10)
 				return TrendDirection.None;
 
-			if (lockedDirection == TrendDirection.Long && bullRank > 0)
-			{
-				if (bearRank >= (int)TrendPhase.Active && bullRank <= (int)TrendPhase.Mature)
-					return TrendDirection.Short;
-				if (bullRank == 0 && bearRank >= (int)TrendPhase.Forming)
-					return TrendDirection.Short;
+			if (bullStrength > bearStrength + 8)
 				return TrendDirection.Long;
-			}
-
-			if (lockedDirection == TrendDirection.Short && bearRank > 0)
-			{
-				if (bullRank >= (int)TrendPhase.Active && bearRank <= (int)TrendPhase.Mature)
-					return TrendDirection.Long;
-				if (bearRank == 0 && bullRank >= (int)TrendPhase.Forming)
-					return TrendDirection.Long;
+			if (bearStrength > bullStrength + 8)
 				return TrendDirection.Short;
-			}
 
-			if (bullRank != bearRank)
-				return bullRank > bearRank ? TrendDirection.Long : TrendDirection.Short;
-
-			if (hist0 > 0)
+			if (hist0 > 0 && bullStrength >= 10)
 				return TrendDirection.Long;
-			if (hist0 < 0)
-				return TrendDirection.Short;
-			if (bullSlope > bearSlope)
-				return TrendDirection.Long;
-			if (bearSlope > bullSlope)
+			if (hist0 < 0 && bearStrength >= 10)
 				return TrendDirection.Short;
 
 			return TrendDirection.None;
+		}
+
+		private double SmoothDisplayStrength(TrendDirection direction, double rawStrength)
+		{
+			if (direction == TrendDirection.None)
+				return Math.Max(0, priorDisplayStrength * 0.7);
+
+			if (priorTrendDirection == direction && rawStrength < priorDisplayStrength)
+				return Math.Max(rawStrength, priorDisplayStrength * 0.88);
+
+			return rawStrength;
+		}
+
+		private TrendPhase DeriveTrendPhase(
+			TrendDirection direction,
+			double strength,
+			TrendPhase priorPhase,
+			TrendDirection priorDirection,
+			bool exhaustion,
+			int fadeBars,
+			double hist0,
+			double hist1)
+		{
+			if (direction == TrendDirection.None || strength < 10)
+				return TrendPhase.Flat;
+
+			bool sameTrend = priorDirection == direction && priorPhase != TrendPhase.Flat;
+			bool momentumGrowing = direction == TrendDirection.Long
+				? hist0 > hist1
+				: hist0 < hist1;
+
+			if (fadeBars >= MomentumFadeBars || (exhaustion && strength < 45))
+			{
+				if (sameTrend && priorPhase >= TrendPhase.Active)
+					return TrendPhase.Fading;
+				return strength >= 20 ? TrendPhase.Mature : TrendPhase.Flat;
+			}
+
+			if (strength >= 55 && momentumGrowing && !exhaustion)
+				return TrendPhase.Active;
+
+			if (strength >= 30 && momentumGrowing)
+				return sameTrend && priorPhase >= TrendPhase.Forming
+					? (priorPhase == TrendPhase.Fading ? TrendPhase.Mature : priorPhase)
+					: TrendPhase.Forming;
+
+			if (sameTrend && priorPhase >= TrendPhase.Active)
+				return TrendPhase.Mature;
+
+			if (strength >= 15)
+				return TrendPhase.Forming;
+
+			return TrendPhase.Flat;
 		}
 
 		private Brush GetEntryBrush(double entrySigned)
@@ -385,51 +413,48 @@ namespace NinjaTrader.NinjaScript.Indicators
 		private double GetEntryScore(
 			TrendDirection direction,
 			TrendPhase phase,
+			double displayStrength,
 			int slopeCount,
 			int approachRaw,
 			bool macdTangle,
 			bool partialSqueeze,
 			bool fullSqueeze)
 		{
-			if (direction == TrendDirection.None || fullSqueeze)
+			if (direction == TrendDirection.None || fullSqueeze || displayStrength < 10)
 				return 0;
 
-			if (phase != TrendPhase.Forming && phase != TrendPhase.Active)
-				return 0;
+			double score = displayStrength * 0.45;
 
-			double score = 0;
-			if (phase == TrendPhase.Active)
-				score += 50;
-			else if (phase == TrendPhase.Forming)
-				score += 20;
-
-			score += Math.Min(4, slopeCount) * 5;
-			score += approachRaw * (20.0 / MAX_APPROACH);
-
-			if (!macdTangle)
-				score += 8;
-
-			if (!partialSqueeze)
-				score += 4;
-
-			return Math.Min(100, score);
-		}
-
-		private static double GetPhaseHeight(TrendPhase phase)
-		{
 			switch (phase)
 			{
-				case TrendPhase.Forming: return 30;
-				case TrendPhase.Active:  return 85;
-				case TrendPhase.Mature:  return 50;
-				case TrendPhase.Fading:  return 20;
-				default:                 return 0;
+				case TrendPhase.Active:
+					score += 25;
+					break;
+				case TrendPhase.Forming:
+					score += 10;
+					break;
+				case TrendPhase.Mature:
+					score += 4;
+					break;
+				case TrendPhase.Fading:
+					return Math.Max(0, displayStrength * 0.15);
 			}
+
+			score += Math.Min(4, slopeCount) * 3;
+			score += approachRaw * (12.0 / MAX_APPROACH);
+
+			if (!macdTangle)
+				score += 6;
+
+			if (!partialSqueeze)
+				score += 3;
+
+			return Math.Min(100, Math.Max(0, score));
 		}
 
-		private Brush GetPhaseBrush(TrendDirection direction, TrendPhase phase)
+		private Brush GetPhaseBrush(TrendDirection direction, TrendPhase phase, double strength)
 		{
-			if (phase == TrendPhase.Flat || direction == TrendDirection.None)
+			if (phase == TrendPhase.Flat || direction == TrendDirection.None || strength < 10)
 				return brushNeutral;
 
 			switch (phase)
@@ -437,7 +462,9 @@ namespace NinjaTrader.NinjaScript.Indicators
 				case TrendPhase.Forming:
 					return brushForming;
 				case TrendPhase.Active:
-					return direction == TrendDirection.Long ? brushBullStrong : brushBearStrong;
+					if (strength >= 70)
+						return direction == TrendDirection.Long ? brushBullStrong : brushBearStrong;
+					return direction == TrendDirection.Long ? brushBullWeak : brushBearWeak;
 				case TrendPhase.Mature:
 					return direction == TrendDirection.Long ? brushBullWeak : brushBearWeak;
 				case TrendPhase.Fading:
@@ -479,14 +506,15 @@ namespace NinjaTrader.NinjaScript.Indicators
 			for (int i = 1; i <= lookback && CurrentBar >= i; i++)
 			{
 				double score = entryScoreHistory[i];
+				double str = strengthHistory[i];
 				bool sameSide = isLong ? score > 0 : score < 0;
 				if (!sameSide)
 					continue;
 
-				double abs = Math.Abs(score);
-				if (abs > bestAbs)
+				double metric = Math.Abs(score) + str * 0.5;
+				if (metric > bestAbs)
 				{
-					bestAbs = abs;
+					bestAbs = metric;
 					bestBarsAgo = i;
 				}
 			}
@@ -496,11 +524,12 @@ namespace NinjaTrader.NinjaScript.Indicators
 
 			string tag = "MES500TDB_Peak_" + (CurrentBar - bestBarsAgo);
 			double entryAtPeak = entryScoreHistory[bestBarsAgo];
+			double strAtPeak   = strengthHistory[bestBarsAgo];
 			double phaseAtPeak = Values[0][bestBarsAgo];
 
 			if (isLong)
 			{
-				double y = Math.Max(entryAtPeak, Math.Abs(phaseAtPeak)) + 8;
+				double y = Math.Max(Math.Max(Math.Abs(entryAtPeak), Math.Abs(phaseAtPeak)), strAtPeak) + 8;
 				Draw.ArrowDown(this, tag + "_Arr", false, bestBarsAgo, y, Brushes.Gold);
 				Draw.Text(this, tag + "_Txt", "PEAK", bestBarsAgo, y + 6, Brushes.Gold);
 			}
@@ -516,6 +545,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 			TrendDirection direction,
 			TrendPhase phase,
 			double entryScore,
+			double displayStrength,
 			int bullSlope,
 			int bearSlope,
 			int appLong,
@@ -527,6 +557,11 @@ namespace NinjaTrader.NinjaScript.Indicators
 			bool shortExh)
 		{
 			string phaseText = GetPhaseText(direction, phase);
+			string strengthText = direction == TrendDirection.Long
+				? "Síla BUY: " + displayStrength.ToString("0") + "/100"
+				: direction == TrendDirection.Short
+					? "Síla SELL: " + displayStrength.ToString("0") + "/100"
+					: "Síla trendu: 0";
 			double entryAbs = Math.Abs(entryScore);
 			string entryText = direction == TrendDirection.Long
 				? "Entry BUY: +" + entryAbs.ToString("0") + "%"
@@ -560,7 +595,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 			string slopeText = "KC slope: bull " + bullSlope + " / bear " + bearSlope;
 			string appText = "Approach: BUY " + appLong + "/7 · SELL " + appShort + "/7";
 
-			string fullText = phaseText + "\n" + entryText + "\n" + sqzText;
+			string fullText = phaseText + "\n" + strengthText + "\n" + entryText + "\n" + sqzText;
 			if (warnText.Length > 0)
 				fullText += "\n" + warnText;
 			fullText += "\n" + slopeText + "\n" + appText;
