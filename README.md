@@ -8,6 +8,7 @@ Indikátory pro **NinjaTrader 8** a ruční obchodování **MES** na **500 tick*
 
 | Soubor | Účel |
 |--------|------|
+| `MES500TSwingMap.cs` | **Swing mapa na grafu** — barvy BUY/SELL/korekce, značky **VSTUP** (vstup) a **◆ PEAK** (výstup), bez SL/TP linek |
 | `MES500TSqueezeMomentumV39.cs` | **Aktuální plná verze** — jasné vstupy NÁKUP/PRODEJ (trend leg uprostřed trendu + band reversal u KC pásma), exit assessment, trend runner |
 | `MES500TSqueezeMomentumV39Light.cs` | **Aktuální lehká verze** — stejná logika jako V39, méně kreslení (vhodné pro slabší PC) |
 | `MES500TDashboard.cs` | **Sub-panel Dashboard v2** — síla trendu, Entry/Exit score, akční panel (Čekej/Vstup/Drž/Zavři), režim trhu, KC zóna |
@@ -26,11 +27,39 @@ Starší verze (V31–V37) nejsou v repozitáři — doporučené jsou **V39 / V
    ```
 2. NinjaScript Editor → **F5** (Compile)
 3. Na graf **MES** (500 tick) přidej indikátor:
+   - swing mapa (barvy + VSTUP/PEAK): **MES500TSwingMap**
    - doporučeno: **MES500TSqueezeMomentumV39** nebo **MES500TSqueezeMomentumV39Light**
    - alternativa: V38, V38Light, V36 nebo V36Light
 
+## MES500TSwingMap — co zobrazuje
+
+Overlay indikátor přímo na cenovém grafu — čte swing strukturu (ATR práh, korekce vs. impuls).
+
+| Prvek | Význam |
+|-------|--------|
+| **Zelená svíčka** | aktivní BUY leg |
+| **Červená svíčka** | aktivní SELL leg |
+| **Růžová svíčka** | korekce — neobchodovat |
+| **Šedá svíčka** | bez signálu (příliš malý pohyb) |
+| **VSTUP ↑/↓** | potvrzený vstup po uzavření svíčky (plná čára ke knotu) |
+| **◆ PEAK** | nejlepší moment k uzavření pozice (čárkovaná tenčí čára) |
+
+Signály se mění **až po uzavření svíčky** (`Calculate.OnBarClose`) — žádné přebarvování historie. PEAK jen u čistého BUY/SELL trendu, ne u korekce.
+
+### Klíčové parametry
+
+| Parametr | Výchozí | Účel |
+|----------|---------|------|
+| Min Swing Ticks | 20 | filtr šumu |
+| Correction Ratio | 0.62 | korekce = pohyb menší než podíl předchozího impulsu |
+| Confirm Bars | 1 | potvrzení pivotu |
+| Peak Min Ticks | 30 | minimální pohyb před zobrazením PEAK |
+| Show Entry Markers | ON | značky VSTUP |
+| Show Peak Markers | ON | značky PEAK |
+
 ## Kterou verzi zvolit
 
+- **MES500TSwingMap** — vizuální mapa trendů na grafu: barvy svíček + VSTUP/PEAK pro ruční vstup a výstup
 - **V39** — doporučeno pro ruční obchod: signály NÁKUP/PRODEJ i uprostřed trendu (trend leg), u pásma (reversal), blocked entry hints, plný UI (panel, popup, ring)
 - **V39 Light** — jako V39, ale bez popupu/panelu/ringu, starší značky se mažou (max 60 svíček) — pro slabší PC
 - **V38** — signály hlavně u horního/dolního KC pásma (reversal), srozumitelné NÁKUP/PRODEJ/ZAVŘÍT, procenta u exitu
